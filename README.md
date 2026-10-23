@@ -23,7 +23,7 @@ Dự án phát triển firmware nhúng hoàn chỉnh và chuỗi công cụ tự
 
 ---
 
-## 1. TÍNH NĂNG NỔI BẬT
+## 1. TÍNH NĂNG
 
 - **Thuật toán Cân bằng Đa vòng (Cascade PID Dual-Loop)**:
   - **Vòng trong (Pitch Angle PD/PID @ 100Hz)**: Ổn định góc nghiêng cực nhanh. Sử dụng trực tiếp tốc độ quay đo từ con quay hồi chuyển (`gyro_rate`) cho khâu vi phân, loại bỏ hoàn toàn hiện tượng xung giật đạo hàm (*derivative kick*) do sai số đo tức thời.
@@ -208,7 +208,7 @@ Sử dụng mạch nạp **ST-Link v2** nối với chân `SWDIO` (PA13), `SWCLK
 
 ---
 
-## 7. CHUỖI CÔNG CỤ TỰ ĐỘNG HÓA & TỐI ƯU PID
+## 7. CHUỖI TỰ ĐỘNG HÓA & TỐI ƯU PID
 
 Dự án cung cấp bộ công cụ tự động hóa khép kín không phụ thuộc vào việc phải căn chỉnh thủ công từng hệ số PID:
 

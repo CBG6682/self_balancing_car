@@ -99,10 +99,6 @@ self_balancing_car/
 │   ├── step5_auto_tune_pid.py          # Bước 5: Nhận dạng hệ thống ARX & tối ưu Nelder-Mead
 │   └── step6_test_control_sequence.py  # Bước 6: Test kịch bản tự động, vẽ biểu đồ 3 kênh
 │
-├── prompt/
-│   ├── guide.md                        # Đề bài ban đầu
-│   └── PLAN.md                         # Kế hoạch chi tiết 12 Task
-│
 ├── setup.sh / setup.bat                # Tự động hóa cài đặt môi trường ảo Python
 ├── build_firmware.sh / build_firmware.bat  # Tự động hóa build firmware C/C++
 └── run_pipeline.sh / run_pipeline.bat      # Tự động hóa điều phối chạy Bước 2 -> Bước 6
