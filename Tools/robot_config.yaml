@@ -1,19 +1,19 @@
 # Cấu hình thông số vật lý và giới hạn điều khiển cho Xe Hai Bánh Tự Cân Bằng (STM32F401CCU6)
 
 chassis:
-  M: 0.85               # Khối lượng thân xe (kg)
+  M: 0.6               # Khối lượng thân xe (kg)
   m: 0.08               # Khối lượng 2 bánh xe (kg)
   R: 0.0325             # Bán kính bánh xe (m) (Bánh xe tiêu chuẩn D=65mm)
-  L: 0.075              # Khoảng cách từ trục bánh xe tới khối tâm COM (m)
-  H: 0.18               # Chiều cao thân xe (m)
+  L: 0.048              # Khoảng cách từ trục bánh xe tới khối tâm COM (m)
+  H: 0.11               # Chiều cao thân xe (m)
   W: 0.16               # Chiều rộng (khoảng cách giữa 2 bánh) (m)
   g: 9.81               # Gia tốc trọng trường (m/s^2)
-  I_body: 0.0035        # Mô men quán tính thân xe quanh khối tâm (kg*m^2)
+  I_body: 0.0016        # Mô men quán tính thân xe quanh khối tâm (kg*m^2)
 
 motor:
   pwm_max: 4199         # Giá trị ARR tối đa của TIM4 PWM (20kHz)
   pwm_deadzone: 450     # Bù vùng chết động cơ GA25 để vượt ma sát khởi động
-  encoder_cpr: 330      # Số xung 1 vòng bánh (11 xung/vòng motor * tỷ số truyền 30)
+  encoder_cpr: 1320      # Số xung 1 vòng bánh (11 xung/vòng motor * tỷ số truyền 30)
   gear_ratio: 30.0      # Tỷ số truyền hộp số GA25
   voltage_nominal: 11.1 # Điện áp danh định pin LiPo 3S (V)
   rpm_max: 280.0        # Vận tốc không tải ở 11.1V (RPM)
@@ -23,7 +23,7 @@ control:
   theta_normal: 20.0    # Ngưỡng góc cân bằng bình thường (độ)
   max_recovery_angle_X: 45.0 # Ngưỡng góc tối đa cho phép tự đứng dậy (độ)
   max_target_angle: 10.0 # Giới hạn góc nghiêng mục tiêu từ vòng vận tốc (độ)
-  max_target_speed: 0.8  # Giới hạn vận tốc đặt từ Bluetooth (m/s)
+  max_target_speed: 0.5  # Giới hạn vận tốc đặt từ Bluetooth (m/s)
 
 uart:
   baudrate: 115200      # Tốc độ baud USART1
