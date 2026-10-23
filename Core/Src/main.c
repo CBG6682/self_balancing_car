@@ -25,7 +25,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "mpu6050_filter.h"
+#include "motor_encoder.h"
+#include "cascade_pid.h"
+#include "robot_fsm.h"
+#include "telemetry_uart.h"
+#include "pid_AutoConfig.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,7 +51,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+volatile uint8_t g_control_tick_10ms_flag = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -96,13 +101,62 @@ int main(void)
   MX_TIM10_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+  /* Initialize Robot Control Modules */
+  CascadePID_Init();
+  MotorEncoder_Init(&htim4, &htim2, &htim3);
+  RobotFSM_Init(THETA_NORMAL_DEG, MAX_RECOVERY_ANGLE_DEG);
+  Telemetry_Init(&huart1);
 
+  /* Initialize and calibrate MPU6050 IMU */
+  if (MPU6050_Init(&hi2c1) == HAL_OK)
+  {
+    MPU6050_Calibrate();
+  }
+
+  /* Start 100Hz Control Loop Timer (10ms tick interrupt) */
+  HAL_TIM_Base_Start_IT(&htim10);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    if (g_control_tick_10ms_flag)
+    {
+      g_control_tick_10ms_flag = 0;
+
+      // 1. Process UART incoming bytes & parse commands
+      Telemetry_ProcessIncoming();
+
+      // 2. Read MPU6050 raw data and update Kalman filter estimate
+      MPU6050_Update(CONTROL_DT_SEC);
+
+      // 3. Read Encoders and calculate wheel velocities
+      MotorEncoder_Update(CONTROL_DT_SEC);
+
+      // 4. Update FSM State Machine & Cascade PID
+      int16_t pwm_left = 0;
+      int16_t pwm_right = 0;
+      const motor_encoder_data_t *enc_data = MotorEncoder_GetData();
+
+      RobotFSM_Update(MPU6050_GetPitch(), MPU6050_GetGyroRate(),
+                      enc_data->speed_avg_mps, CONTROL_DT_SEC,
+                      &pwm_left, &pwm_right);
+
+      // 5. Output PWM to TB6612 Dual H-Bridge
+      Motor_SetOutput(pwm_left, pwm_right);
+
+      // 6. Send Telemetry if streaming is active
+      if (Telemetry_IsStreaming())
+      {
+        Telemetry_SendData(MPU6050_GetPitch(),
+                           MPU6050_GetGyroRate(),
+                           (int16_t)((pwm_left + pwm_right) / 2),
+                           enc_data->total_pulses_left,
+                           enc_data->total_pulses_right,
+                           (uint8_t)RobotFSM_GetState());
+      }
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -156,7 +210,18 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM10)
+  {
+    g_control_tick_10ms_flag = 1;
+  }
+}
 /* USER CODE END 4 */
 
 /**

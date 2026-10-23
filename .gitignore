@@ -1,0 +1,47 @@
+# ==============================================================================
+# Git Ignore Configuration: STM32F401CCU6 Self-Balancing Robot
+# ==============================================================================
+
+# Build artifacts
+build/
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+*.obj
+*.d
+
+# Python Virtual Environments & Packages
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Temporary Telemetry Data Files
+Tools/*.csv
+
+# Project Management & Prompt Folders
+prompt/
+
+# IDE & Editor Configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.cproject
+.settings/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini

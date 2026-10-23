@@ -1,0 +1,39 @@
+{
+  "config_hash": "f7a40f114d21cb8b3a5b087889eb9e85",
+  "timestamp": "2026-10-23T16:07:11.499324",
+  "lqr_gains": {
+    "k_pos": -2.0,
+    "k_vel": -3.3921,
+    "k_ang": 28.2606,
+    "k_rate": 3.8445,
+    "closed_loop_poles": [
+      "-118415.864 + 0.000j",
+      "-0.634 + 0.000j",
+      "-3.934 + 2.682j",
+      "-3.934 + -2.682j"
+    ],
+    "stable": true
+  },
+  "cascade_pid": {
+    "angle_kp": 350.0,
+    "angle_ki": 1.75,
+    "angle_kd": 5.0,
+    "speed_kp": 6.0,
+    "speed_ki": 0.4,
+    "speed_kd": 0.0
+  },
+  "limits": {
+    "pwm_max": 4199,
+    "pwm_deadzone": 450,
+    "theta_normal": 20.0,
+    "max_recovery_angle_X": 45.0
+  },
+  "tuned_timestamp": "2026-10-23T16:20:40.272873",
+  "system_identification": {
+    "r2_score": 0.9659,
+    "arx_a1": 1.123,
+    "arx_a2": -0.4778,
+    "arx_b1": 0.001277,
+    "arx_b2": -0.000277
+  }
+}
