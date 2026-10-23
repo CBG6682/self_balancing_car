@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Step 4: Mock Data Generator & Hardware Data Acquisition
+Mock Data Generator & Hardware Data Acquisition
 Target: STM32F401CCU6 Self-Balancing Robot
 
 Features:
@@ -22,6 +22,10 @@ import json
 import numpy as np
 import serial
 import serial.tools.list_ports
+
+# Import shared logger utility
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import logger_utils as logger
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
@@ -105,7 +109,7 @@ class MockDataGenerator:
     def generate(self, duration_sec: float = 6.0, dt: float = 0.01, output_file: str = MOCK_CSV_FILE):
         """Generate time-series telemetry data and save to CSV."""
         steps = int(duration_sec / dt)
-        print(f"Generating physics mock telemetry: {duration_sec}s ({steps} steps @ {1.0/dt:.0f}Hz)...")
+        logger.info(f"Đang sinh dữ liệu mô phỏng vật lý phi tuyến RK4: {duration_sec}s ({steps} bước @ {1.0/dt:.0f}Hz)...")
 
         # Initial state: small initial tilt of 2.5 degrees
         state = np.array([0.0, 0.0, math.radians(2.5), 0.0])
@@ -206,13 +210,13 @@ class MockDataGenerator:
             writer.writeheader()
             writer.writerows(records)
 
-        print(f"Mock telemetry successfully written to: {output_file} ({len(records)} samples)")
+        logger.success(f"Dữ liệu mô phỏng đã được ghi vào: {output_file} ({len(records)} mẫu)")
         return output_file
 
 
 def probe_and_collect_real_hardware(config_path: str, output_file: str = REAL_CSV_FILE, duration_sec: float = 6.0):
     """
-    Scan available serial ports, test PING/PONG handshake with STM32.
+    Scan available physical serial ports, test PING/PONG handshake with STM32.
     If responsive, collect real telemetry stream.
     Returns True if hardware connected & collected, False otherwise.
     """
@@ -220,20 +224,21 @@ def probe_and_collect_real_hardware(config_path: str, output_file: str = REAL_CS
         config = yaml.safe_load(f)
 
     baudrate = int(config["uart"].get("baudrate", 115200))
-    ports = serial.tools.list_ports.comports()
+    all_ports = serial.tools.list_ports.comports()
+    physical_ports = logger.filter_physical_ports(all_ports)
 
-    if not ports:
-        print("[HARDWARE SCAN] Khong tim thay cong Serial/USB nao tren he thong.")
+    if not physical_ports:
+        logger.warn("Không phát hiện cáp USB-UART/ST-Link nào được cắm. Tự động chuyển sang Mock Data...")
         return False
 
-    print(f"[HARDWARE SCAN] Phat hien {len(ports)} cong Serial. Dang kiem tra bat tay PING/PONG...")
+    logger.info(f"Đang kiểm tra {len(physical_ports)} cổng USB/Serial khả dụng...")
 
     connected_ser = None
     target_port = None
 
-    for port_info in ports:
+    for port_info in physical_ports:
         port_name = port_info.device
-        print(f"  -> Thu ket noi toi {port_name} ({port_info.description})...")
+        print(f"\r  -> Thử bắt tay PING/PONG trên {port_name} ({port_info.description})...", end="", flush=True)
         try:
             ser = serial.Serial(port_name, baudrate=baudrate, timeout=0.8)
             time.sleep(0.3)
@@ -247,7 +252,8 @@ def probe_and_collect_real_hardware(config_path: str, output_file: str = REAL_CS
             # Read response
             reply = ser.readline().decode("utf-8", errors="ignore").strip()
             if "PONG" in reply:
-                print(f"  ==> [SUCCESS] Mach STM32 da phan hoi 'PONG' tren cong {port_name}!")
+                print()  # newline after \r
+                logger.success(f"Mạch STM32 đã phản hồi 'PONG' trên cổng {port_name}!")
                 connected_ser = ser
                 target_port = port_name
                 break
@@ -257,11 +263,12 @@ def probe_and_collect_real_hardware(config_path: str, output_file: str = REAL_CS
             continue
 
     if connected_ser is None:
-        print("[HARDWARE SCAN] Khong co mach STM32 nao phan hoi 'PONG'.")
+        print()  # newline after \r
+        logger.warn("Không có mạch STM32 nào phản hồi 'PONG' trên các cổng đã quét.")
         return False
 
     # Collect streaming telemetry
-    print(f"\n[REAL ACQUISITION] Bat dau thu thap du lieu thuc te trong {duration_sec} giay tu {target_port}...")
+    logger.info(f"Bắt đầu thu thập dữ liệu thực tế trong {duration_sec} giây từ {target_port}...")
     connected_ser.write(b"START_STREAM\n")
     connected_ser.flush()
 
@@ -302,34 +309,29 @@ def probe_and_collect_real_hardware(config_path: str, output_file: str = REAL_CS
             ])
             writer.writeheader()
             writer.writerows(records)
-        print(f"[REAL ACQUISITION] Da luu {len(records)} mau du lieu thuc vao: {output_file}")
+        logger.success(f"Đã lưu {len(records)} mẫu dữ liệu thực vào: {output_file}")
         return True
     else:
-        print("[REAL ACQUISITION] Khong nhan duoc goi tin DATA hop le.")
+        logger.error("Không nhận được gói tin DATA hợp lệ từ mạch STM32.")
         return False
 
 
 def main():
-    print("=================================================================")
-    print(" STEP 4: Data Acquisition & Fallback Mock Generator")
-    print("=================================================================")
+    logger.step_header("Thu Thập Dữ Liệu & Giả Lập Fallback")
 
     # 1. Always generate or update physical mock telemetry as baseline reference
     generator = MockDataGenerator(CONFIG_FILE, GAINS_FILE)
     mock_file = generator.generate(duration_sec=6.0, dt=0.01, output_file=MOCK_CSV_FILE)
 
-    # 2. Probe hardware connection
+    # 2. Probe hardware connection with physical port filtering
     has_real_hardware = probe_and_collect_real_hardware(CONFIG_FILE, REAL_CSV_FILE, duration_sec=6.0)
 
-    print("\n-----------------------------------------------------------------")
     if has_real_hardware:
-        print("[STATUS] >> Phat hien mach thuc te: Da thu thap Tools/real_telemetry.csv.")
-        print("          Quy trinh tiep theo (Step 5) se su dung du lieu thuc te nay.")
+        logger.success("Phát hiện mạch phần cứng thực tế: Đã thu thập Tools/real_telemetry.csv")
+        logger.info("Quy trình tiếp theo (Tối ưu hóa PID) sẽ sử dụng dữ liệu đo đạc thực tế này.")
     else:
-        print("[STATUS] >> KHONG CO MACH PHAN HOI (CHUA KET NOI PHAN CUNG).")
-        print(f"          Tu dong FALLBACK su dung du lieu gia lap: {mock_file}")
-        print("          Dam bao pipeline kiem thu & toi uu PID (Step 5, 6) tiep tuc chay hoan hao.")
-    print("=================================================================")
+        logger.fallback(f"Sử dụng dữ liệu mô phỏng Runge-Kutta 4 (RK4): {mock_file}")
+        logger.info("Đảm bảo pipeline nhận dạng & tối ưu hóa PID tiếp tục chạy chuẩn xác.")
 
 
 if __name__ == "__main__":

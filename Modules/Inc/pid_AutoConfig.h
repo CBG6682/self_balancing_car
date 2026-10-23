@@ -2,7 +2,7 @@
  * ==============================================================================
  * @file    pid_AutoConfig.h
  * @brief   Auto-generated PID & hardware control parameters.
- *          Optimized by Tools/step5_auto_tune_pid.py (Nelder-Mead ITAE).
+ *          Optimized by Tools/auto_tune_pid.py (Nelder-Mead ITAE).
  * ==============================================================================
  */
 
@@ -16,12 +16,12 @@ extern "C" {
 /* -----------------------------------------------------------------------------
  * Cascade PID Optimal Gains (Tuned via System Identification & ITAE)
  * -------------------------------------------------------------------------- */
-#define DEFAULT_ANGLE_KP            350.00f
-#define DEFAULT_ANGLE_KI            1.750f
-#define DEFAULT_ANGLE_KD            5.000f
+#define DEFAULT_ANGLE_KP            101.35f
+#define DEFAULT_ANGLE_KI            0.050f
+#define DEFAULT_ANGLE_KD            2.688f
 
-#define DEFAULT_SPEED_KP            6.00f
-#define DEFAULT_SPEED_KI            0.400f
+#define DEFAULT_SPEED_KP            8.00f
+#define DEFAULT_SPEED_KI            0.500f
 #define DEFAULT_SPEED_KD            0.000f
 
 /* -----------------------------------------------------------------------------

@@ -49,7 +49,7 @@ Dự án phát triển firmware nhúng hoàn chỉnh và chuỗi công cụ tự
   - Thu thập dữ liệu thực tế kèm cơ chế Fallback mô phỏng phi tuyến Runge-Kutta 4 (RK4).
   - Nhận dạng hệ thống hàm truyền ARX(2,2) Least Squares đạt $R^2 > 96\%$.
   - Tối ưu hóa hệ số PID bằng thuật toán Nelder-Mead (ITAE) đưa sai số xác lập về $< 1.0^\circ$.
-  - Kiểm thử kịch bản tự động (`step6_test_control_sequence.py`) đánh giá tự động PASS/FAIL và xuất đồ thị phản hồi 3 kênh.
+  - Kiểm thử kịch bản tự động (`test_control_sequence.py`) đánh giá tự động PASS/FAIL và xuất đồ thị phản hồi 3 kênh.
 
 ---
 
@@ -150,10 +150,10 @@ self_balancing_car/
     ├── computed_gains.json     # Cache lưu trữ bộ thông số PID tối ưu
     ├── mock_telemetry.csv      # File dữ liệu mô phỏng Runge-Kutta 4
     ├── test_result_plot.png    # Đồ thị kiểm thử kịch bản tự động
-    ├── step2_sim_and_init_pid.py      # B2: Giải LQR & khởi tạo PID có cache
-    ├── step4_data_acquisition.py      # B4: Thu thập UART hoặc sinh Mock RK4
-    ├── step5_auto_tune_pid.py         # B5: Nhận dạng ARX & Nelder-Mead ITAE
-    └── step6_test_control_sequence.py # B6: Kiểm thử kịch bản & xuất đồ thị
+    ├── sim_and_init_pid.py      # Giải LQR & khởi tạo PID có cache
+    ├── data_acquisition.py      # Thu thập UART hoặc sinh Mock RK4
+    ├── auto_tune_pid.py         # Nhận dạng ARX & Nelder-Mead ITAE
+    └── test_control_sequence.py # Kiểm thử kịch bản & xuất đồ thị
 ```
 
 ---
@@ -217,11 +217,11 @@ Dự án cung cấp bộ công cụ tự động hóa khép kín không phụ th
 - **Windows**: `run_pipeline.bat --all`
 
 Quy trình sẽ tự động thực hiện 4 bước liên hoàn:
-1. **Step 2 (LQR Solver & Caching)**: Đọc mô hình vật lý từ `Tools/robot_config.yaml`, giải phương trình Riccati liên tục, phân bổ nghiệm LQR thành hệ số Cascade PID và lưu vào `Tools/computed_gains.json`.
-2. **Step 4 (Data Acquisition)**: Tự động quét các cổng serial gửi bắt tay `PING`. Nếu chưa kết nối robot thật, tự động kích hoạt bộ sinh dữ liệu vật lý phi tuyến Runge-Kutta 4 xuất ra file `Tools/mock_telemetry.csv`.
-3. **Step 5 (System Identification & Nelder-Mead Optimization)**: Khớp mô hình hàm truyền rời rạc ARX(2,2) bằng thuật toán Bình phương Tối thiểu (Least Squares) đạt $R^2 > 96\%$, sau đó tối ưu hóa hệ số PID giảm thiểu hàm phạt ITAE. Tự động ghi đè file header C `Modules/Inc/pid_AutoConfig.h`.
-4. **Step 6 (Control Sequence Testing)**: Chạy kịch bản tự động gồm 6 giai đoạn (`BALANCE` $\rightarrow$ `FORWARD` $\rightarrow$ `STOP` $\rightarrow$ `BACKWARD` $\rightarrow$ `TURN` $\rightarrow$ `STOP`), tự động chấm điểm và lưu ảnh đồ thị `Tools/test_result_plot.png`.
-5. **Auto-Rebuild**: Tự động gọi biên dịch lại firmware STM32 với bộ thông số mới.
+1. **Mô Phỏng Vật Lý & Khởi Tạo LQR (`sim_and_init_pid.py`)**: Đọc mô hình vật lý từ `Tools/robot_config.yaml`, giải phương trình Riccati liên tục, phân bổ nghiệm LQR thành hệ số Cascade PID và lưu vào `Tools/computed_gains.json`.
+2. **Thu Thập Dữ Liệu / Giả Lập Fallback (`data_acquisition.py`)**: Tự động quét các cổng serial gửi bắt tay `PING`. Nếu chưa kết nối robot thật, tự động kích hoạt bộ sinh dữ liệu vật lý phi tuyến Runge-Kutta 4 xuất ra file `Tools/mock_telemetry.csv`.
+3. **Nhận Dạng Hệ Thống & Tối Ưu Hóa PID (`auto_tune_pid.py`)**: Khớp mô hình hàm truyền rời rạc ARX(2,2) bằng thuật toán Bình phương Tối thiểu (Least Squares) đạt $R^2 > 96\%$, sau đó tối ưu hóa hệ số PID giảm thiểu hàm phạt ITAE. Tự động ghi đè file header C `Modules/Inc/pid_AutoConfig.h`.
+4. **Kiểm Thử Kịch Bản Điều Khiển Tự Động (`test_control_sequence.py`)**: Chạy kịch bản tự động gồm 6 giai đoạn (`BALANCE` $\rightarrow$ `FORWARD` $\rightarrow$ `STOP` $\rightarrow$ `BACKWARD` $\rightarrow$ `TURN` $\rightarrow$ `STOP`), tự động chấm điểm và lưu ảnh đồ thị `Tools/test_result_plot.png`.
+5. **Biên Dịch Lại Firmware**: Tự động gọi biên dịch lại firmware STM32 với bộ thông số mới.
 
 ---
 

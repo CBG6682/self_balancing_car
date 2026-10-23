@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Step 6: Automated Control Sequence Testing & Stability Verification
+Automated Control Sequence Testing & Stability Verification
 Target: STM32F401CCU6 Self-Balancing Robot
 
 Features:
@@ -9,7 +9,7 @@ Features:
    BACKWARD (1.5s) -> TURN_LEFT (1.0s) -> TURN_RIGHT (1.0s) -> STOP_AND_BALANCE (3.0s)
 2. Dual-mode execution:
    - Hardware Mode: Streams commands to STM32 over USB-UART and logs live responses.
-   - Simulation Mode: Runs sequence in full non-linear physical model with Step 5 tuned PID.
+   - Simulation Mode: Runs sequence in full non-linear physical model with tuned PID.
 3. Automated PASS/FAIL evaluation of stability criteria:
    - Fall prevention: |theta| < 45.0 deg at all times.
    - Deceleration & Braking: Comes to rest (|v| < 0.08 m/s) within 1.5s of STOP command.
@@ -32,6 +32,10 @@ import matplotlib.pyplot as plt
 
 import serial
 import serial.tools.list_ports
+
+# Import shared logger utility
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import logger_utils as logger
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
@@ -200,60 +204,71 @@ class SequenceSimulator:
 
 
 def evaluate_stability(traj: dict):
-    """Evaluates stability criteria and prints PASS/FAIL report."""
+    """Evaluates stability criteria and prints formatted PASS/FAIL report table."""
     times = np.array(traj["time"])
     angles = np.array(traj["pitch_angle"])
     vels = np.array(traj["velocity"])
     pwms = np.array(traj["pwm_left"])
     intervals = traj["phase_intervals"]
 
-    print("=================================================================")
-    print(" DANH GIA TIEU CHUAN ON DINH & DIEU KHIEN (CRITERIA VERIFICATION)")
-    print("=================================================================")
+    logger.sub_header("Đánh Giá Tiêu Chuẩn Ổn Định & Điều Khiển (Criteria Verification)")
+
+    headers = ["Tiêu Chuẩn Kiểm Tra", "Giá Trị Đo Được", "Ngưỡng Đạt", "Đánh Giá"]
+    rows = []
 
     # 1. Fall prevention: |theta| < 45.0 deg
-    max_abs_angle = np.max(np.abs(angles))
+    max_abs_angle = float(np.max(np.abs(angles)))
     passed_fall = max_abs_angle < 45.0
-    print(f"1. Kiem tra chong do nga (|theta| < 45.0 do):")
-    print(f"   -> Goc nghieng lon nhat dat: {max_abs_angle:.2f} do")
-    print(f"   -> Ket qua: {'[PASS]' if passed_fall else '[FAIL]'}")
+    rows.append([
+        "Chống đổ ngã (|θ| < 45.0°)",
+        f"Góc max: {max_abs_angle:.2f}°",
+        "< 45.0°",
+        "[PASS]" if passed_fall else "[FAIL]"
+    ])
 
     # 2. Braking performance during STOP_AND_BALANCE phases
     passed_brake = True
-    brake_results = []
+    brake_idx = 1
     for name, t_start, t_end in intervals:
         if name == "STOP_AND_BALANCE":
-            # Check velocity at t_start + 1.5s
             t_eval = t_start + 1.5
             idx = np.argmin(np.abs(times - t_eval))
-            v_brake = abs(vels[idx])
+            v_brake = float(abs(vels[idx]))
             passed_this = v_brake < 0.10
-            brake_results.append((t_eval, v_brake, passed_this))
             if not passed_this:
                 passed_brake = False
-
-    print(f"\n2. Kiem tra kha nang tu phanh khi ngung lenh (|v| < 0.10 m/s sau 1.5s):")
-    for t_eval, v_brake, p in brake_results:
-        print(f"   -> Tai t = {t_eval:.1f}s: Van toc con lai |v| = {v_brake:.3f} m/s ({'[PASS]' if p else '[FAIL]'})")
-    print(f"   -> Ket qua chung khau phanh: {'[PASS]' if passed_brake else '[FAIL]'}")
+            desc = "Sau tiến (FORWARD)" if brake_idx == 1 else "Cuối kịch bản (xoay)"
+            rows.append([
+                f"Tự phanh dừng #{brake_idx} ({desc})",
+                f"|v| sau 1.5s = {v_brake:.3f} m/s",
+                "< 0.10 m/s",
+                "[PASS]" if passed_this else "[FAIL]"
+            ])
+            brake_idx += 1
 
     # 3. Steady balance accuracy: |theta_error| < 1.0 deg during last 1.5s of STOP_AND_BALANCE
     last_phase = intervals[-1]
     t_steady_start = last_phase[2] - 1.5
     steady_indices = np.where(times >= t_steady_start)[0]
     steady_angles = np.abs(angles[steady_indices])
-    max_steady_angle = np.max(steady_angles)
-    mean_steady_angle = np.mean(steady_angles)
+    max_steady_angle = float(np.max(steady_angles))
+    mean_steady_angle = float(np.mean(steady_angles))
     passed_steady = max_steady_angle < 1.0
 
-    print(f"\n3. Kiem tra do chinh xac thang bang xac lap (|theta| < 1.0 do):")
-    print(f"   -> Goc trung binh: {mean_steady_angle:.3f} do, Goc toi da: {max_steady_angle:.3f} do")
-    print(f"   -> Ket qua: {'[PASS]' if passed_steady else '[FAIL]'}")
+    rows.append([
+        "Thăng bằng xác lập 1.5s cuối",
+        f"TB: {mean_steady_angle:.3f}°, Max: {max_steady_angle:.3f}°",
+        "< 1.0°",
+        "[PASS]" if passed_steady else "[FAIL]"
+    ])
+
+    logger.print_table(headers, rows, ["left", "center", "center", "center"])
 
     overall_pass = passed_fall and passed_brake and passed_steady
-    print("\n-----------------------------------------------------------------")
-    print(f"TONG KET KIEM THU KICH BAN TU DONG: {'>>> [DAT CHUAN - PASS] <<<' if overall_pass else '>>> [KHONG DAT - FAIL] <<<'}")
-    print("=================================================================")
+    if overall_pass:
+        logger.box_banner("TỔNG KẾT KIỂM THỬ KỊCH BẢN: >>> [ĐẠT CHUẨN - PASS] <<<", is_pass=True)
+    else:
+        logger.box_banner("TỔNG KẾT KIỂM THỬ KỊCH BẢN: >>> [KHÔNG ĐẠT - FAIL] <<<", is_pass=False)
 
     return overall_pass
 
@@ -323,38 +338,43 @@ def plot_results(traj: dict, output_image: str = PLOT_FILE):
     plt.tight_layout()
     plt.savefig(output_image, dpi=200)
     plt.close()
-    print(f"[PLOT SAVED] Do thi phan hoi da duoc luu tai: {output_image}")
+    logger.success(f"Đồ thị phản hồi đã được lưu tại: {output_image}")
 
 
 def main():
-    print("=================================================================")
-    print(" STEP 6: Automated Control Sequence Testing (Without Bluetooth)")
-    print("=================================================================")
+    logger.step_header("Kiểm Thử Kịch Bản Điều Khiển Tự Động & Đánh Giá Ổn Định")
 
     # Probe for physical STM32
-    ports = serial.tools.list_ports.comports()
+    all_ports = serial.tools.list_ports.comports()
+    physical_ports = logger.filter_physical_ports(all_ports)
     has_stm32 = False
-    for port_info in ports:
-        try:
-            ser = serial.Serial(port_info.device, baudrate=115200, timeout=0.5)
-            ser.write(b"PING\n")
-            ser.flush()
-            reply = ser.readline().decode("utf-8", errors="ignore").strip()
-            if "PONG" in reply:
-                print(f"[MODE] Phat hien mach STM32 tren cong {port_info.device}.")
-                has_stm32 = True
+    connected_port = None
+
+    if physical_ports:
+        logger.info(f"Đang kiểm tra {len(physical_ports)} cổng USB/Serial khả dụng...")
+        for port_info in physical_ports:
+            try:
+                ser = serial.Serial(port_info.device, baudrate=115200, timeout=0.5)
+                ser.write(b"PING\n")
+                ser.flush()
+                reply = ser.readline().decode("utf-8", errors="ignore").strip()
+                if "PONG" in reply:
+                    logger.success(f"Phát hiện mạch STM32 trên cổng {port_info.device}!")
+                    has_stm32 = True
+                    connected_port = port_info.device
+                    ser.close()
+                    break
                 ser.close()
-                break
-            ser.close()
-        except Exception:
-            continue
+            except Exception:
+                continue
+    else:
+        logger.warn("Không phát hiện cáp USB-UART/ST-Link nào được cắm.")
 
     if has_stm32:
-        print("[MODE] Thuc thi kịch ban truc tiep tren mach STM32...")
+        logger.info(f"Thực thi kịch bản trực tiếp trên phần cứng STM32 ({connected_port})...")
         # (Hardware mode: streams commands over serial and collects live telemetry)
     else:
-        print("[MODE] KHONG PHAT HIEN MACH (CHUA KET NOI PHAN CUNG).")
-        print("       Chay kịch ban tu dong tren BO MO PHONG VAT LY PHI TUYEN...")
+        logger.fallback("Chạy kịch bản tự động trên BỘ MÔ PHỎNG VẬT LÝ PHI TUYẾN (Non-linear RK4)...")
 
     # Run simulation with tuned PID
     sim = SequenceSimulator(CONFIG_FILE, GAINS_FILE)

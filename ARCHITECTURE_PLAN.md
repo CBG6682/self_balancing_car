@@ -13,11 +13,11 @@ Dự án xe hai bánh tự cân bằng (Self-Balancing Robot) bao gồm hai thà
 +-----------------------------------------------------------------------------------+
 |                                  MÁY TÍNH (PC)                                    |
 |  +--------------------+     +-----------------------+     +--------------------+  |
-|  | robot_config.yaml  | --> | step2_sim_and_init_pid| --> | pid_AutoConfig.h   |  |
+|  | robot_config.yaml  | --> |   sim_and_init_pid    | --> | pid_AutoConfig.h   |  |
 |  +--------------------+     +-----------------------+     +--------------------+  |
 |                                         |                                         |
 |  +--------------------+     +-----------v-----------+     +--------------------+  |
-|  |  mock/real data    | --> |  step5_auto_tune_pid  | --> | SET_PID (UART)     |  |
+|  |  mock/real data    | --> |     auto_tune_pid     | --> | SET_PID (UART)     |  |
 |  +--------------------+     +-----------------------+     +--------------------+  |
 +-----------------------------------------|-----------------------------------------+
                                           | UART 115200bps (PA9/PA10)
@@ -94,14 +94,14 @@ self_balancing_car/
 │   ├── requirements.txt                # Danh sách thư viện Python cần cài đặt
 │   ├── robot_config.yaml               # File thông số vật lý xe và ngưỡng FSM
 │   ├── computed_gains.json             # File lưu trữ hệ số PID kèm mã băm MD5
-│   ├── step2_sim_and_init_pid.py       # Bước 2: LQR con lắc ngược & sinh pid_AutoConfig.h
-│   ├── step4_data_acquisition.py       # Bước 4: Giả lập Runge-Kutta & quét kết nối UART
-│   ├── step5_auto_tune_pid.py          # Bước 5: Nhận dạng hệ thống ARX & tối ưu Nelder-Mead
-│   └── step6_test_control_sequence.py  # Bước 6: Test kịch bản tự động, vẽ biểu đồ 3 kênh
+│   ├── sim_and_init_pid.py             # LQR con lắc ngược & sinh pid_AutoConfig.h
+│   ├── data_acquisition.py             # Giả lập Runge-Kutta & quét kết nối UART
+│   ├── auto_tune_pid.py                # Nhận dạng hệ thống ARX & tối ưu Nelder-Mead
+│   └── test_control_sequence.py        # Test kịch bản tự động, vẽ biểu đồ 3 kênh
 │
 ├── setup.sh / setup.bat                # Tự động hóa cài đặt môi trường ảo Python
 ├── build_firmware.sh / build_firmware.bat  # Tự động hóa build firmware C/C++
-└── run_pipeline.sh / run_pipeline.bat      # Tự động hóa điều phối chạy Bước 2 -> Bước 6
+└── run_pipeline.sh / run_pipeline.bat      # Tự động hóa điều phối chuỗi công cụ mô phỏng & tối ưu
 ```
 
 ---
