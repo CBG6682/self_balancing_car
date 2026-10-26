@@ -175,7 +175,7 @@ def print_table(headers: list, rows: list, col_align: list = None):
 def filter_physical_ports(ports: list) -> list:
     """
     Filters out legacy dummy Linux serial ports (/dev/ttyS0..31 with 'n/a' description).
-    Keeps true USB-UART adapters, FTDI, CH340, CP2102, ST-Link, COM ports, /dev/ttyUSB*, /dev/ttyACM*.
+    Keeps true USB-UART adapters, ESP32-S3 DevKitC (CDC/UART), FTDI, CH340/CH343, CP2102, ST-Link, COM ports, /dev/ttyUSB*, /dev/ttyACM*.
     """
     physical = []
     for p in ports:

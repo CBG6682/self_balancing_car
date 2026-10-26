@@ -13,7 +13,7 @@ chassis:
 motor:
   pwm_max: 4199         # Giá trị ARR tối đa của TIM4 PWM (20kHz)
   pwm_deadzone: 450     # Bù vùng chết động cơ GA25 để vượt ma sát khởi động
-  encoder_cpr: 1320      # Số xung 1 vòng bánh (11 xung/vòng motor * tỷ số truyền 30)
+  encoder_cpr: 1320     # Số xung 1 vòng bánh (11 xung/vòng motor * tỷ số truyền 30)
   gear_ratio: 30.0      # Tỷ số truyền hộp số GA25
   voltage_nominal: 11.1 # Điện áp danh định pin LiPo 3S (V)
   rpm_max: 280.0        # Vận tốc không tải ở 11.1V (RPM)
@@ -23,8 +23,8 @@ control:
   theta_normal: 20.0    # Ngưỡng góc cân bằng bình thường (độ)
   max_recovery_angle_X: 45.0 # Ngưỡng góc tối đa cho phép tự đứng dậy (độ)
   max_target_angle: 10.0 # Giới hạn góc nghiêng mục tiêu từ vòng vận tốc (độ)
-  max_target_speed: 0.5  # Giới hạn vận tốc đặt từ Bluetooth (m/s)
+  max_target_speed: 0.5  # Giới hạn vận tốc đặt từ Bluetooth BLE / App (m/s)
 
 uart:
-  baudrate: 115200      # Tốc độ baud USART1
+  baudrate: 115200      # Tốc độ baud USART1 (Giao tiếp ESP32-S3 BLE Bridge / PC)
   timeout: 1.0          # Timeout đọc cổng UART (giây)

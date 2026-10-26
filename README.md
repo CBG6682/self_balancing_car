@@ -81,9 +81,12 @@ Toàn bộ cấu hình chân khớp 100% với mã nguồn CubeMX (`Core/Src/gpi
 | **Encoder Phải**| VCC / GND | 3.3V / GND | - | Cấp nguồn Hall sensor | 3.3V |
 | | Phase A | **PB4** | TIM3_CH1 | Kênh A Encoder bánh phải (Mode TI12) | 3.3V |
 | | Phase B | **PB5** | TIM3_CH2 | Kênh B Encoder bánh phải (Mode TI12) | 3.3V |
-| **Bluetooth / UART**| VCC / GND | 5V / GND | 5V / GND Pin | Cấp nguồn HC-05 hoặc cáp USB-UART | 5V / 3.3V |
-| | TXD (Module) | **PA10** | USART1_RX | Nhận lệnh điều khiển / tuning | 3.3V |
-| | RXD (Module) | **PA9** | USART1_TX | Phát dữ liệu Telemetry tốc độ cao | 3.3V |
+| **Bluetooth BLE (ESP32-S3)**| 5V / VIN | 5V Pin | Nguồn Buck LM2596 | Cấp nguồn bo mạch ESP32-S3 DevKitC | 5V (300-500mA) |
+| | GND | GND | GND Pin | Mass chung toàn hệ thống | 0V |
+| | GPIO 4 (UART1_TX) | **PA10** | USART1_RX | Nhận lệnh điều khiển từ ESP32-S3 BLE | 3.3V Logic |
+| | GPIO 5 (UART1_RX) | **PA9** | USART1_TX | Gửi telemetry từ STM32 sang ESP32-S3 BLE | 3.3V Logic |
+| **Giao Tiếp Nạp/Debug PC** | Cáp Type-C | Cổng USB ESP32 | - | Nạp firmware BLE bridge & gỡ lỗi | 5V USB |
+| | Cáp USB-UART rời | **PA9/PA10** | USART1 | Tùy chọn cắm trực tiếp PC để auto-tune | 3.3V Logic |
 | **Định Thời Chu Kỳ** | Nội bộ | - | **TIM10** | Ngắt chu kỳ điều khiển 10ms (100Hz) | Nội bộ |
 
 > [!WARNING]
@@ -153,7 +156,10 @@ self_balancing_car/
     ├── sim_and_init_pid.py      # Giải LQR & khởi tạo PID có cache
     ├── data_acquisition.py      # Thu thập UART hoặc sinh Mock RK4
     ├── auto_tune_pid.py         # Nhận dạng ARX & Nelder-Mead ITAE
-    └── test_control_sequence.py # Kiểm thử kịch bản & xuất đồ thị
+    ├── test_control_sequence.py # Kiểm thử kịch bản & xuất đồ thị
+    └── esp32_s3_ble_bridge/     # Firmware BLE 5.0 cho mạch Bluetooth ESP32-S3 rời
+        ├── esp32_s3_ble_bridge.ino # Mã nguồn Arduino/ESP-IDF BLE-to-UART Bridge
+        └── README.md            # Hướng dẫn nạp và kết nối điện thoại qua BLE
 ```
 
 ---
@@ -251,16 +257,25 @@ Khi bạn chế tạo khung xe mới, thay pin có trọng lượng khác hoặc
 
 ---
 
-## 9. ĐẶC TẢ GIAO THỨC TELEMETRY UART
+## 9. ĐẶC TẢ GIAO THỨC TELEMETRY UART & BLUETOOTH BLE (ESP32-S3)
 
 Tốc độ Baud mặc định: **115200 bps**, 8 data bits, no parity, 1 stop bit (USART1 - PA9/PA10).
+Hệ thống sử dụng **ESP32-S3 DevKitC** làm mạch cầu nối **Bluetooth Low Energy (BLE 5.0)** theo chuẩn dịch vụ **Nordic UART Service (NUS)**:
+- **Service UUID**: `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
+- **RX Char (Điện thoại -> Xe)**: `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` (Write)
+- **TX Char (Xe -> Điện thoại)**: `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` (Notify)
+- Xem hướng dẫn chi tiết nạp code và kết nối app tại [Tools/esp32_s3_ble_bridge/README.md](Tools/esp32_s3_ble_bridge/README.md).
 
-### Lệnh gửi từ Máy tính / App Bluetooth tới STM32:
-- `PING\n`: Bắt tay kết nối. STM32 sẽ phản hồi `PONG\n`.
+### Lệnh gửi từ App Bluetooth (BLE) / Máy tính tới STM32:
+- `PING\n`: Bắt tay kết nối (STM32 phản hồi `PONG\n`).
+- `ESP:PING\n`: Bắt tay từ bo mạch cầu nối ESP32-S3 (STM32 phản hồi `ESP:PONG\n`).
+- `STATUS\n` hoặc `CMD:STATUS\n`: Truy vấn trạng thái máy FSM và trạng thái kết nối BLE.
+- `BLE:CONNECTED\n`: Sự kiện khi điện thoại kết nối BLE (STM32 xác nhận `OK_BLE:CONNECTED\n`).
+- `BLE:DISCONNECTED\n`: **Cơ chế an toàn (Fail-safe)**: Khi ngắt kết nối BLE, ESP32-S3 lập tức gửi lệnh này để STM32 tự động phanh gấp (`CMD_STOP`) giữ xe thăng bằng đứng yên.
 - `START_STREAM\n`: Bật chế độ phát dữ liệu Telemetry định kỳ 10ms.
 - `STOP_STREAM\n`: Dừng phát dữ liệu Telemetry.
-- `SET_PID:<ang_kp>,<ang_ki>,<ang_kd>,<spd_kp>,<spd_ki>\n`: Cập nhật trực tiếp bộ thông số PID vào RAM khi xe đang đứng. Ví dụ: `SET_PID:120.0,1.5,3.2,8.0,0.5\n`. Phản hồi: `ACK:PID_UPDATED\n`.
-- `FORWARD\n`, `BACKWARD\n`, `LEFT\n`, `RIGHT\n`, `STOP\n`: Các lệnh điều khiển chuyển động thủ công.
+- `SET_PID:<ang_kp>,<ang_ki>,<ang_kd>,<spd_kp>,<spd_ki>\n`: Cập nhật trực tiếp bộ thông số PID vào RAM khi xe đang đứng. Ví dụ: `SET_PID:120.0,1.5,3.2,8.0,0.5\n`. Phản hồi: `OK_PID:...\n`.
+- `FORWARD\n` (hoặc `F\n`), `BACKWARD\n` (hoặc `B\n`), `LEFT\n` (hoặc `L\n`), `RIGHT\n` (hoặc `R\n`), `STOP\n` (hoặc `S\n`): Các lệnh điều khiển chuyển động thủ công (tương thích các nút Macro trong app *Serial Bluetooth Terminal*).
 
 ### Dữ liệu Telemetry STM32 phát lên (khi bật stream):
 Định dạng chuỗi ASCII kết thúc bằng ký tự xuống dòng `\n`:

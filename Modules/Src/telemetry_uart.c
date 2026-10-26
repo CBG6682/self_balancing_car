@@ -15,6 +15,7 @@
 static UART_HandleTypeDef *s_huart = NULL;
 static uint8_t s_rx_byte_tmp = 0;
 static uint8_t s_is_streaming = 0;
+static uint8_t s_ble_connected = 0;
 
 /* Circular Ring Buffer for non-blocking UART RX */
 static uint8_t s_rx_ringbuf[TELEMETRY_RX_BUF_SIZE];
@@ -39,13 +40,53 @@ static void ProcessCommandLine(char *cmd_line)
         return;
     }
 
-    // 1. Handshake Query
+    // Filter unsolicited bootloader logs or debug output from ESP32-S3
+    if (strncmp(cmd_line, "ESP-ROM:", 8) == 0 ||
+        strncmp(cmd_line, "rst:", 4) == 0 ||
+        strncmp(cmd_line, "boot:", 5) == 0 ||
+        strncmp(cmd_line, "ets ", 4) == 0 ||
+        strncmp(cmd_line, "load:", 5) == 0 ||
+        strncmp(cmd_line, "entry ", 6) == 0 ||
+        strncmp(cmd_line, "[I]", 3) == 0 ||
+        strncmp(cmd_line, "[E]", 3) == 0 ||
+        strncmp(cmd_line, "[W]", 3) == 0 ||
+        strncmp(cmd_line, "[D]", 3) == 0) {
+        return;
+    }
+
+    // 1. Handshake Queries (Both STM32 standard PING and ESP32-S3 bridge ping)
+    if (strncmp(cmd_line, "ESP:PING", 8) == 0) {
+        Telemetry_SendString("ESP:PONG\n");
+        return;
+    }
     if (strncmp(cmd_line, "PING", 4) == 0) {
         Telemetry_SendString("PONG\n");
         return;
     }
 
-    // 2. Telemetry Stream Control
+    // 2. ESP32-S3 BLE Connection Event Handlers (Fail-Safe Mechanism)
+    if (strncmp(cmd_line, "BLE:CONNECTED", 13) == 0 || strcmp(cmd_line, "CONNECTED") == 0) {
+        s_ble_connected = 1;
+        Telemetry_SendString("OK_BLE:CONNECTED\n");
+        return;
+    }
+    if (strncmp(cmd_line, "BLE:DISCONNECTED", 16) == 0 || strcmp(cmd_line, "DISCONNECTED") == 0) {
+        s_ble_connected = 0;
+        RobotFSM_SetCommand(CMD_STOP); // Immediately halt robot for safety
+        Telemetry_SendString("OK_BLE:DISCONNECTED\n");
+        return;
+    }
+
+    // 3. Status Query
+    if (strcmp(cmd_line, "STATUS") == 0 || strcmp(cmd_line, "CMD:STATUS") == 0) {
+        char status_buf[80];
+        snprintf(status_buf, sizeof(status_buf), "STATUS:%s,BLE:%u\n",
+                 RobotFSM_GetStateString(), (unsigned int)s_ble_connected);
+        Telemetry_SendString(status_buf);
+        return;
+    }
+
+    // 4. Telemetry Stream Control
     if (strncmp(cmd_line, "START_STREAM", 12) == 0) {
         s_is_streaming = 1;
         Telemetry_SendString("STREAM_STARTED\n");
@@ -57,7 +98,7 @@ static void ProcessCommandLine(char *cmd_line)
         return;
     }
 
-    // 3. Hot PID Tuning Command
+    // 5. Hot PID Tuning Command
     // Format: SET_PID:<ang_kp>,<ang_ki>,<ang_kd>,<spd_kp>,<spd_ki>
     if (strncmp(cmd_line, "SET_PID:", 8) == 0) {
         float ang_kp = 0.0f, ang_ki = 0.0f, ang_kd = 0.0f;
@@ -76,7 +117,7 @@ static void ProcessCommandLine(char *cmd_line)
         return;
     }
 
-    // 4. Motion Control Commands (Full string and single-letter short forms)
+    // 6. Motion Control Commands (Full string and single-letter short forms)
     if (strcmp(cmd_line, "CMD:FORWARD") == 0 || strcmp(cmd_line, "FORWARD") == 0 || strcmp(cmd_line, "F") == 0) {
         RobotFSM_SetCommand(CMD_FORWARD);
         Telemetry_SendString("OK_CMD:FORWARD\n");
@@ -118,6 +159,7 @@ void Telemetry_Init(UART_HandleTypeDef *huart)
     s_rx_tail = 0;
     s_line_idx = 0;
     s_is_streaming = 0;
+    s_ble_connected = 0;
 
     Telemetry_StartReceiveIT();
 }
@@ -195,6 +237,20 @@ uint8_t Telemetry_IsStreaming(void)
 void Telemetry_SetStreaming(uint8_t enable)
 {
     s_is_streaming = enable ? 1 : 0;
+}
+
+uint8_t Telemetry_IsBLEConnected(void)
+{
+    return s_ble_connected;
+}
+
+void Telemetry_SendStatus(float angle, float speed, uint8_t state)
+{
+    if (s_huart == NULL) return;
+    char buf[80];
+    snprintf(buf, sizeof(buf), "STATUS:%.2f,%.2f,%u,BLE:%u\n",
+             angle, speed, (unsigned int)state, (unsigned int)s_ble_connected);
+    Telemetry_SendString(buf);
 }
 
 /* -----------------------------------------------------------------------------

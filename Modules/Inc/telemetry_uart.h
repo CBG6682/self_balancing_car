@@ -3,11 +3,16 @@
  * @file    telemetry_uart.h
  * @brief   Telemetry Communication & Command Protocol over USART1 (115200bps).
  *          Target: STM32F401CCU6 (PA9 = TX, PA10 = RX)
+ *          Interfaces with:
+ *          - ESP32-S3 DevKitC (External BLE 5.0 Nordic UART Service Bridge)
+ *          - USB-UART FTDI / CP2102 / CH340 / ST-Link for PC auto-tuning
  *          Supports:
- *          - Handshake: PING / PONG
+ *          - Handshake: PING / PONG, ESP:PING / ESP:PONG
+ *          - BLE connection events: BLE:CONNECTED, BLE:DISCONNECTED (auto-brake fail-safe)
  *          - Hot PID tuning: SET_PID:<ang_kp>,<ang_ki>,<ang_kd>,<spd_kp>,<spd_ki>
- *          - Motion control: FORWARD, BACKWARD, LEFT, RIGHT, STOP
+ *          - Motion control: FORWARD, BACKWARD, LEFT, RIGHT, STOP (or F, B, L, R, S)
  *          - Telemetry streaming: DATA:<angle>,<gyro>,<pwm>,<enc_l>,<enc_r>,<state>
+ *          - System query: STATUS -> STATUS:<state>,<pitch>,<speed>
  * ==============================================================================
  */
 
@@ -82,6 +87,20 @@ uint8_t Telemetry_IsStreaming(void);
  * @param  enable: 1 to start streaming, 0 to stop
  */
 void Telemetry_SetStreaming(uint8_t enable);
+
+/**
+ * @brief  Check if ESP32-S3 BLE client is actively connected.
+ * @retval 1 if BLE connected, 0 if disconnected or unknown
+ */
+uint8_t Telemetry_IsBLEConnected(void);
+
+/**
+ * @brief  Send quick status report string.
+ * @param  angle: Current pitch angle (deg)
+ * @param  speed: Current velocity (m/s)
+ * @param  state: Current FSM state integer
+ */
+void Telemetry_SendStatus(float angle, float speed, uint8_t state);
 
 #ifdef __cplusplus
 }

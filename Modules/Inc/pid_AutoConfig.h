@@ -16,9 +16,9 @@ extern "C" {
 /* -----------------------------------------------------------------------------
  * Cascade PID Optimal Gains (Tuned via System Identification & ITAE)
  * -------------------------------------------------------------------------- */
-#define DEFAULT_ANGLE_KP            221.55f
+#define DEFAULT_ANGLE_KP            111.87f
 #define DEFAULT_ANGLE_KI            0.050f
-#define DEFAULT_ANGLE_KD            3.726f
+#define DEFAULT_ANGLE_KD            2.000f
 
 #define DEFAULT_SPEED_KP            8.00f
 #define DEFAULT_SPEED_KI            0.500f

@@ -1,6 +1,6 @@
 {
-  "config_hash": "f6822baf8337b9c77d7cd4d39ba78fb3",
-  "timestamp": "2026-10-23T17:40:48.182271",
+  "config_hash": "bf69cb1235129a440dd64b32f2fe11ef",
+  "timestamp": "2026-10-26T22:50:29.768837",
   "lqr_gains": {
     "k_pos": -2.0,
     "k_vel": -3.0512,
@@ -23,9 +23,9 @@
     "speed_kd": 0.0
   },
   "cascade_pid": {
-    "angle_kp": 221.55,
+    "angle_kp": 111.87,
     "angle_ki": 0.05,
-    "angle_kd": 3.726,
+    "angle_kd": 2.0,
     "speed_kp": 8.0,
     "speed_ki": 0.5,
     "speed_kd": 0.0
@@ -36,12 +36,12 @@
     "theta_normal": 20.0,
     "max_recovery_angle_X": 45.0
   },
-  "tuned_timestamp": "2026-10-23T17:40:50.049821",
+  "tuned_timestamp": "2026-10-26T22:50:30.729373",
   "system_identification": {
-    "r2_score": 0.9901,
-    "arx_a1": 1.4651,
-    "arx_a2": -0.4818,
-    "arx_b1": 0.001723,
-    "arx_b2": -0.001722
+    "r2_score": 0.9859,
+    "arx_a1": 1.5624,
+    "arx_a2": -0.5892,
+    "arx_b1": 0.001063,
+    "arx_b2": -0.001038
   }
 }

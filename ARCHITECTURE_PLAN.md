@@ -97,7 +97,8 @@ self_balancing_car/
 │   ├── sim_and_init_pid.py             # LQR con lắc ngược & sinh pid_AutoConfig.h
 │   ├── data_acquisition.py             # Giả lập Runge-Kutta & quét kết nối UART
 │   ├── auto_tune_pid.py                # Nhận dạng hệ thống ARX & tối ưu Nelder-Mead
-│   └── test_control_sequence.py        # Test kịch bản tự động, vẽ biểu đồ 3 kênh
+│   ├── test_control_sequence.py        # Test kịch bản tự động, vẽ biểu đồ 3 kênh
+│   └── esp32_s3_ble_bridge/            # Firmware nạp cho module Bluetooth rời ESP32-S3 (BLE 5.0)
 │
 ├── setup.sh / setup.bat                # Tự động hóa cài đặt môi trường ảo Python
 ├── build_firmware.sh / build_firmware.bat  # Tự động hóa build firmware C/C++
@@ -282,7 +283,7 @@ self_balancing_car/
 
 ### 3.5 Module Truyền Thông Telemetry & Lệnh UART (`telemetry_uart`)
 - **Vai trò**:
-  - Giao tiếp với Bluetooth HC-05 và PC qua `USART1` (PA9 TX, PA10 RX) ở Baudrate 115200bps.
+  - Giao tiếp với module Bluetooth ESP32-S3 DevKitC (BLE 5.0) và PC qua `USART1` (PA9 TX, PA10 RX) ở Baudrate 115200bps.
   - Sử dụng ngắt nhận `HAL_UART_Receive_IT` kết hợp Ring Buffer để không bao giờ làm chặn hoặc chậm trễ vòng lặp điều khiển 100Hz.
   - Phân tích cú pháp các lệnh điều khiển, bắt tay PING/PONG, lệnh nạp nóng PID `SET_PID:...`, và phát chuỗi dữ liệu Telemetry định kỳ.
 - **Cấu trúc dữ liệu chính**:
