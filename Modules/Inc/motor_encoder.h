@@ -36,6 +36,10 @@ typedef struct {
     int16_t pwm_right;              // Target command PWM (-4199 to +4199)
     uint16_t deadzone;              // Static friction deadzone compensation
     uint8_t is_enabled;             // Driver enabled state (STBY pin HIGH)
+    int8_t motor_left_polarity;     // Motor left direction (+1 or -1)
+    int8_t motor_right_polarity;    // Motor right direction (+1 or -1)
+    int8_t enc_left_polarity;       // Encoder left direction (+1 or -1)
+    int8_t enc_right_polarity;      // Encoder right direction (+1 or -1)
 } motor_encoder_data_t;
 
 /* -----------------------------------------------------------------------------
@@ -79,6 +83,21 @@ void Motor_Enable(void);
  * @param  deadzone: Deadzone offset (typically 300 to 600 for GA25 motors)
  */
 void Motor_SetDeadzone(uint16_t deadzone);
+
+/**
+ * @brief  Configure motor and encoder direction polarities (+1 or -1).
+ */
+void Motor_SetPolarity(int8_t ml, int8_t mr, int8_t el, int8_t er);
+
+/**
+ * @brief  Get current motor and encoder direction polarities.
+ */
+void Motor_GetPolarity(int8_t *ml, int8_t *mr, int8_t *el, int8_t *er);
+
+/**
+ * @brief  Run motors directly for hardware testing / verification.
+ */
+void Motor_TestRun(int16_t pwm_l, int16_t pwm_r);
 
 /**
  * @brief  Reset cumulative encoder pulse counters and distance to zero.

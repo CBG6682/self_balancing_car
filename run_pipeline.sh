@@ -71,8 +71,67 @@ run_all() {
 }
 
 # Command line arguments parsing
+run_hardware_check() {
+    "$PYTHON_BIN" Tools/hardware_check.py
+}
+
+run_check_connection() {
+    "$PYTHON_BIN" Tools/check_connection.py
+}
+
+run_motor_test() {
+    "$PYTHON_BIN" Tools/motor_test_interactive.py
+}
+
+run_sensor_test() {
+    "$PYTHON_BIN" Tools/sensor_test_live.py
+}
+
+run_bridge_test() {
+    "$PYTHON_BIN" Tools/test_bridge_live.py
+}
+
+run_flash_hid() {
+    "$PYTHON_BIN" Tools/flash_hid.py build/Debug/self_balancing_car.bin
+}
+
+run_flash_stlink() {
+    "$PYTHON_BIN" Tools/flash_stlink.py build/Debug/self_balancing_car.bin
+}
+
+run_self_test() {
+    "$PYTHON_BIN" Tools/system_self_test.py
+}
+
 if [ "$1" == "--all" ] || [ "$1" == "-a" ]; then
     run_all
+    exit 0
+elif [ "$1" == "--selftest" ] || [ "$1" == "--diag" ] || [ "$1" == "-d" ]; then
+    run_self_test
+    exit 0
+elif [ "$1" == "--check" ] || [ "$1" == "-c" ]; then
+    run_check_connection
+    exit 0
+elif [ "$1" == "--hardware" ] || [ "$1" == "-hw" ]; then
+    run_hardware_check
+    exit 0
+elif [ "$1" == "--motor" ] || [ "$1" == "-m" ]; then
+    run_motor_test
+    exit 0
+elif [ "$1" == "--sensor" ] || [ "$1" == "-s" ]; then
+    run_sensor_test
+    exit 0
+elif [ "$1" == "--bridge" ] || [ "$1" == "-b" ]; then
+    run_bridge_test
+    exit 0
+elif [ "$1" == "--loopback" ] || [ "$1" == "-lb" ]; then
+    "$PYTHON_BIN" Tools/test_stm32_loopback.py
+    exit 0
+elif [ "$1" == "--flash" ] || [ "$1" == "-f" ]; then
+    run_flash_hid
+    exit 0
+elif [ "$1" == "--stlink" ] || [ "$1" == "-st" ]; then
+    run_flash_stlink
     exit 0
 elif [ "$1" == "--sim" ] || [ "$1" == "--step2" ]; then
     run_sim_lqr
@@ -90,53 +149,58 @@ elif [ "$1" == "--test" ] || [ "$1" == "--step6" ]; then
 elif [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
     echo "Cách sử dụng: ./run_pipeline.sh [OPTION]"
     echo "Options:"
-    echo "  --all, -a     Chạy toàn bộ quy trình từ Mô phỏng đến Kiểm thử và build firmware"
-    echo "  --sim         Mô phỏng & Khởi tạo LQR PID từ robot_config.yaml"
-    echo "  --data        Thu thập telemetry từ UART hoặc sinh mock CSV"
-    echo "  --tune        Nhận dạng ARX & Tối ưu hóa PID (Nelder-Mead ITAE)"
-    echo "  --test        Kiểm thử kịch bản điều khiển tự động & xuất đồ thị"
+    echo "  --selftest, -d   Kiểm tra TỔNG THỂ từng linh kiện có xác nhận (system_self_test.py)"
+    echo "  --all, -a        Chạy toàn bộ quy trình từ Mô phỏng đến Kiểm thử và build firmware"
+    echo "  --motor, -m      Kiểm tra động cơ TB6612 tương tác (motor_test_interactive.py)"
+    echo "  --sensor, -s     Bảng theo dõi cảm biến IMU MPU6050 & Encoder (sensor_test_live.py)"
+    echo "  --bridge, -b     Kiểm tra thông tuyến UART thời gian thực (test_bridge_live.py)"
+    echo "  --flash, -f      Nạp firmware STM32 qua USB HID Bootloader (flash_hid.py)"
+    echo "  --stlink, -st    Nạp firmware STM32 qua mạch nạp ST-Link SWD (flash_stlink.py)"
+    echo "  --hardware, -hw  Kiểm tra phần cứng & Tune xe trực tiếp (Live check & Auto-tune)"
+    echo "  --check, -c      Chẩn đoán & Lắng nghe kết nối USB-UART thời gian thực (check_connection.py)"
+    echo "  --sim            Mô phỏng & Khởi tạo LQR PID từ robot_config.yaml"
+    echo "  --data           Thu thập telemetry từ UART hoặc sinh mock CSV"
+    echo "  --tune           Nhận dạng ARX & Tối ưu hóa PID (Nelder-Mead ITAE)"
+    echo "  --test           Kiểm thử kịch bản điều khiển tự động & xuất đồ thị"
     echo "  (Không đối số): Hiện menu lựa chọn tương tác"
     exit 0
 fi
 
 # Interactive menu if no arguments provided
 echo "Chọn chế độ chạy:"
-echo "  1) Chạy TOÀN BỘ quy trình (Mô phỏng -> Thu thập -> Tối ưu -> Kiểm thử -> Rebuild Firmware)"
-echo "  2) Mô phỏng Vật lý & Khởi tạo LQR PID"
-echo "  3) Thu thập / Sinh dữ liệu telemetry (CSV)"
-echo "  4) Nhận dạng hệ thống ARX & Tối ưu hóa PID"
-echo "  5) Kiểm thử kịch bản điều khiển & Vẽ đồ thị phản hồi"
-echo "  6) Chỉ biên dịch firmware STM32 (build_firmware.sh)"
+echo "  1) [KHUYẾN NGHỊ] Kiểm tra TỔNG THỂ từng linh kiện & kết nối (Tools/system_self_test.py)"
+echo "  2) Chạy TOÀN BỘ quy trình Auto-Tuning (Mô phỏng -> Thu thập -> Tối ưu -> Build)"
+echo "  3) Mô phỏng Vật lý & Khởi tạo LQR PID"
+echo "  4) Thu thập / Sinh dữ liệu telemetry (CSV)"
+echo "  5) Nhận dạng hệ thống ARX & Tối ưu hóa PID"
+echo "  6) Kiểm thử kịch bản điều khiển & Vẽ đồ thị phản hồi"
+echo "  7) Chỉ biên dịch firmware STM32 (build_firmware.sh)"
+echo "  8) Kiểm tra phần cứng & Tune xe thực tế (Tools/hardware_check.py)"
+echo "  9) Kiểm tra động cơ tương tác (Tools/motor_test_interactive.py)"
+echo " 10) Bảng theo dõi cảm biến IMU & Encoder (Tools/sensor_test_live.py)"
+echo " 11) Kiểm tra thông tuyến UART ESP32 <-> STM32 (Tools/test_bridge_live.py)"
+echo " 12) Nạp firmware STM32 qua USB HID Type-C (Tools/flash_hid.py)"
+echo " 13) Nạp firmware STM32 qua ST-Link V2/V3 (Tools/flash_stlink.py)"
+echo " 14) Chẩn đoán & Lắng nghe kết nối USB-UART (Tools/check_connection.py)"
 echo "  0) Thoát"
 echo "----------------------------------------------------------"
-read -r -p "Nhập lựa chọn [1-6, 0]: " choice
+read -r -p "Nhập lựa chọn [1-14, 0]: " choice
 
 case "$choice" in
-    1)
-        run_all
-        ;;
-    2)
-        run_sim_lqr
-        ;;
-    3)
-        run_data_acq
-        ;;
-    4)
-        run_auto_tune
-        rebuild_firmware
-        ;;
-    5)
-        run_test_seq
-        ;;
-    6)
-        rebuild_firmware
-        ;;
-    0)
-        echo "Đã thoát."
-        exit 0
-        ;;
-    *)
-        echo -e "${BOLD_RED}[ERROR] Lựa chọn không hợp lệ!${RESET}"
-        exit 1
-        ;;
+    1) run_self_test ;;
+    2) run_all ;;
+    3) run_sim_lqr ;;
+    4) run_data_acq ;;
+    5) run_auto_tune; rebuild_firmware ;;
+    6) run_test_seq ;;
+    7) rebuild_firmware ;;
+    8) run_hardware_check ;;
+    9) run_motor_test ;;
+    10) run_sensor_test ;;
+    11) run_bridge_test ;;
+    12) run_flash_hid ;;
+    13) run_flash_stlink ;;
+    14) run_check_connection ;;
+    0) echo "Đã thoát."; exit 0 ;;
+    *) echo -e "${BOLD_RED}[ERROR] Lựa chọn không hợp lệ!${RESET}"; exit 1 ;;
 esac

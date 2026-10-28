@@ -54,8 +54,9 @@ if [ -f "$ELF_FILE" ] && [ -f "$BIN_FILE" ] && [ -f "$HEX_FILE" ]; then
     echo "  -> BIN: $BIN_FILE ($(du -h "$BIN_FILE" | cut -f1))"
     echo "  -> HEX: $HEX_FILE ($(du -h "$HEX_FILE" | cut -f1))"
     echo "----------------------------------------------------------"
-    echo "[FLASH HINT] Ban co the nap truc tiep bang STM32CubeProgrammer hoac OpenOCD:"
-    echo "  st-flash write $BIN_FILE 0x08000000"
+    echo "[FLASH HINT] Ban co the nap firmware bang 1 trong 2 cach:"
+    echo "  1) Qua cong USB Type-C (WeAct Studio HID Bootloader): ./Tools/flash_usb.sh"
+    echo "  2) Qua mach nap ST-Link V2: st-flash write $BIN_FILE 0x08000000"
 else
     echo "[ERROR] File build dich khong day du. Vui long kiem tra lai log loi phia tren."
     exit 1

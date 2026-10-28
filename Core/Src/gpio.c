@@ -72,5 +72,26 @@ void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 2 */
+void Board_LED_Init(void)
+{
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = GPIO_PIN_13;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+    // On BlackPill, PC13 is active LOW: 1 = LED OFF, 0 = LED ON
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+}
 
+void Board_LED_Toggle(void)
+{
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+}
+
+void Board_LED_Set(uint8_t state)
+{
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, state ? GPIO_PIN_RESET : GPIO_PIN_SET);
+}
 /* USER CODE END 2 */

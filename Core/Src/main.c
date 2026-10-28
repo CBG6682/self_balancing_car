@@ -31,6 +31,8 @@
 #include "robot_fsm.h"
 #include "telemetry_uart.h"
 #include "pid_AutoConfig.h"
+#include "motor_test.h"
+#include "uart_loopback_test.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,7 +42,20 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+/* ==============================================================================
+ * CHẾ ĐỘ CHẨN ĐOÁN & KIỂM TRA PHẦN CỨNG:
+ *   RUN_UART_LOOPBACK_TEST:
+ *     1: KÍCH HOẠT CHẾ ĐỘ LOOPBACK TEST CỔNG UART (PA9 nối PA10 bằng 1 sợi dây cắm)
+ *        - STM32 tự phát PING, nếu toàn bộ tín hiệu nhận về là PING -> ĐÈN LED PC13 CHỚP LIÊN TỤC.
+ *        - Rút dây ra -> ĐÈN LED TẮT NGÚM.
+ *     0: Tắt chế độ test loopback (để xe chạy tự cân bằng bình thường).
+ *
+ *   RUN_MOTOR_TEST_MODE:
+ *     1: Chế độ kiểm tra động cơ tự động 6 pha
+ *     0: Tắt
+ * ============================================================================== */
+#define RUN_UART_LOOPBACK_TEST 1
+#define RUN_MOTOR_TEST_MODE    0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -73,7 +88,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  /* Relocate Interrupt Vector Table to match WeAct HID Bootloader offset (0x08004000) */
+  SCB->VTOR = 0x08004000;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -102,15 +118,31 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   /* Initialize Robot Control Modules */
+  Board_LED_Init();
   CascadePID_Init();
   MotorEncoder_Init(&htim4, &htim2, &htim3);
   RobotFSM_Init(THETA_NORMAL_DEG, MAX_RECOVERY_ANGLE_DEG);
   Telemetry_Init(&huart1);
 
+#if (RUN_UART_LOOPBACK_TEST == 1)
+  /* Chạy chế độ Loopback Test cổng UART1 (PA9 nối PA10): Không cần cảm biến hay động cơ */
+  UART_Loopback_Test_Run();
+#endif
+
+  /* Clear I2C bus to unfreeze MPU6050 in case of previous warm reset */
+  MPU6050_I2C_BusClear();
+  MX_I2C1_Init();
+
   /* Initialize and calibrate MPU6050 IMU */
   if (MPU6050_Init(&hi2c1) == HAL_OK)
   {
+    Telemetry_SendString("[SYS] MPU6050: OK (WHO_AM_I verified)\n");
     MPU6050_Calibrate();
+    Telemetry_SendString("[SYS] IMU Calibration: OK (Kalman ready)\n");
+  }
+  else
+  {
+    Telemetry_SendString("[ERR] MPU6050 Init FAILED! Check PB6/PB7 wiring & VCC\n");
   }
 
   /* Start 100Hz Control Loop Timer (10ms tick interrupt) */
@@ -121,12 +153,16 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+#if (RUN_MOTOR_TEST_MODE == 1)
+    /* Chế độ kiểm tra động cơ tự động: Lặp lại chu trình 6 pha */
+    Motor_RunAutoTestLoop();
+#else
+    /* Continuously process incoming UART packets for lowest command latency */
+    Telemetry_ProcessIncoming();
+
     if (g_control_tick_10ms_flag)
     {
       g_control_tick_10ms_flag = 0;
-
-      // 1. Process UART incoming bytes & parse commands
-      Telemetry_ProcessIncoming();
 
       // 2. Read MPU6050 raw data and update Kalman filter estimate
       MPU6050_Update(CONTROL_DT_SEC);
@@ -156,7 +192,26 @@ int main(void)
                            enc_data->total_pulses_right,
                            (uint8_t)RobotFSM_GetState());
       }
+
+      // 7. Visual LED Heartbeat
+      static uint32_t s_heartbeat_cnt = 0;
+      s_heartbeat_cnt++;
+      if (MPU6050_IsConnected())
+      {
+        if (s_heartbeat_cnt % 50 == 0) // 1Hz normal heartbeat
+        {
+          Board_LED_Toggle();
+        }
+      }
+      else
+      {
+        if (s_heartbeat_cnt % 10 == 0) // 5Hz fast error blink
+        {
+          Board_LED_Toggle();
+        }
+      }
     }
+#endif
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

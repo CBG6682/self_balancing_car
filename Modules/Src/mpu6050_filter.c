@@ -13,6 +13,48 @@
 /* Private module state */
 static I2C_HandleTypeDef *s_hi2c = NULL;
 static mpu6050_data_t s_sensor_data;
+static uint8_t s_mpu_i2c_addr = MPU6050_I2C_ADDR; // Default 0x68 << 1 = 0xD0
+static uint8_t s_is_connected = 0;
+
+/* -----------------------------------------------------------------------------
+ * Hardware I2C Bus Recovery (9 SCL clock pulses to free locked slave SDA)
+ * -------------------------------------------------------------------------- */
+void MPU6050_I2C_BusClear(void)
+{
+    // Enable GPIOB clock
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    // Configure PB6 (SCL) and PB7 (SDA) as Open Drain Outputs
+    GPIO_InitStruct.Pin = GPIO_PIN_6 | GPIO_PIN_7;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+    HAL_Delay(1);
+
+    // If SDA is pulled LOW by MPU6050, pulse SCL 9 times to complete hung transaction
+    for (uint8_t i = 0; i < 9; i++) {
+        if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7) == GPIO_PIN_SET) {
+            break; // SDA has been released
+        }
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+        for (volatile int d = 0; d < 200; d++);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+        for (volatile int d = 0; d < 200; d++);
+    }
+
+    // Generate STOP condition: SDA goes LOW while SCL is HIGH, then SDA goes HIGH
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+    for (volatile int d = 0; d < 200; d++);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+    HAL_Delay(1);
+}
 
 /* -----------------------------------------------------------------------------
  * Private Helper Functions
@@ -21,13 +63,13 @@ static mpu6050_data_t s_sensor_data;
 static HAL_StatusTypeDef MPU6050_WriteRegister(uint8_t reg, uint8_t value)
 {
     if (s_hi2c == NULL) return HAL_ERROR;
-    return HAL_I2C_Mem_Write(s_hi2c, MPU6050_I2C_ADDR, reg, I2C_MEMADD_SIZE_8BIT, &value, 1, 100);
+    return HAL_I2C_Mem_Write(s_hi2c, s_mpu_i2c_addr, reg, I2C_MEMADD_SIZE_8BIT, &value, 1, 20);
 }
 
-static HAL_StatusTypeDef MPU6050_ReadRegisters(uint8_t reg, uint8_t *data, uint16_t length)
+static HAL_StatusTypeDef MPU6050_ReadRegisters(uint8_t reg, uint8_t *data, uint16_t length, uint32_t timeout)
 {
     if (s_hi2c == NULL) return HAL_ERROR;
-    return HAL_I2C_Mem_Read(s_hi2c, MPU6050_I2C_ADDR, reg, I2C_MEMADD_SIZE_8BIT, data, length, 100);
+    return HAL_I2C_Mem_Read(s_hi2c, s_mpu_i2c_addr, reg, I2C_MEMADD_SIZE_8BIT, data, length, timeout);
 }
 
 static void Kalman_Init(kalman_filter_t *kf)
@@ -97,43 +139,54 @@ HAL_StatusTypeDef MPU6050_Init(I2C_HandleTypeDef *hi2c)
 
     memset(&s_sensor_data, 0, sizeof(mpu6050_data_t));
     Kalman_Init(&s_sensor_data.kalman);
+    s_sensor_data.accel_pitch_offset = MECHANICAL_BALANCE_OFFSET_DEG;
 
-    // 1. Verify Device ID via WHO_AM_I
+    // 1. Probe I2C address: Try 0xD0 (AD0=GND), then 0xD2 (AD0=3.3V)
     uint8_t who_am_i = 0;
-    if (MPU6050_ReadRegisters(MPU6050_REG_WHO_AM_I, &who_am_i, 1) != HAL_OK) {
-        return HAL_ERROR;
-    }
-    if (who_am_i != MPU6050_WHO_AM_I_VALUE) {
-        return HAL_ERROR;
+    s_mpu_i2c_addr = MPU6050_I2C_ADDR; // 0xD0
+    if (MPU6050_ReadRegisters(MPU6050_REG_WHO_AM_I, &who_am_i, 1, 50) != HAL_OK || who_am_i != MPU6050_WHO_AM_I_VALUE) {
+        // Try alternate address 0xD2
+        s_mpu_i2c_addr = (0x69 << 1);
+        who_am_i = 0;
+        if (MPU6050_ReadRegisters(MPU6050_REG_WHO_AM_I, &who_am_i, 1, 50) != HAL_OK || who_am_i != MPU6050_WHO_AM_I_VALUE) {
+            s_is_connected = 0;
+            return HAL_ERROR;
+        }
     }
 
     // 2. Reset Device and Wake Up (Clear SLEEP bit, select PLL with X-axis Gyro clock)
     if (MPU6050_WriteRegister(MPU6050_REG_PWR_MGMT_1, 0x01) != HAL_OK) {
+        s_is_connected = 0;
         return HAL_ERROR;
     }
     HAL_Delay(10);
 
     // 3. Set Sample Rate Divider: SMPLRT_DIV = 0 (Sample Rate = 1kHz)
     if (MPU6050_WriteRegister(MPU6050_REG_SMPLRT_DIV, 0x00) != HAL_OK) {
+        s_is_connected = 0;
         return HAL_ERROR;
     }
 
     // 4. Digital Low Pass Filter: DLPF_CFG = 3 (Accel BW = 44Hz, Gyro BW = 42Hz)
     // Minimizes high frequency vibration noise from GA25 gearbox
     if (MPU6050_WriteRegister(MPU6050_REG_CONFIG, 0x03) != HAL_OK) {
+        s_is_connected = 0;
         return HAL_ERROR;
     }
 
     // 5. Gyroscope Full Scale: +/-2000 deg/s (FS_SEL = 3, Scale = 16.4 LSB/dps)
     if (MPU6050_WriteRegister(MPU6050_REG_GYRO_CONFIG, 0x18) != HAL_OK) {
+        s_is_connected = 0;
         return HAL_ERROR;
     }
 
     // 6. Accelerometer Full Scale: +/-4g (AFS_SEL = 1, Scale = 8192 LSB/g)
     if (MPU6050_WriteRegister(MPU6050_REG_ACCEL_CONFIG, 0x08) != HAL_OK) {
+        s_is_connected = 0;
         return HAL_ERROR;
     }
 
+    s_is_connected = 1;
     return HAL_OK;
 }
 
@@ -143,9 +196,10 @@ void MPU6050_Calibrate(void)
     float sum_gyro_pitch = 0.0f;
     float sum_accel_pitch = 0.0f;
     uint8_t raw_buffer[14];
+    uint16_t valid_samples = 0;
 
     for (uint16_t i = 0; i < CALIBRATION_SAMPLES; i++) {
-        if (MPU6050_ReadRegisters(MPU6050_REG_ACCEL_XOUT_H, raw_buffer, 14) == HAL_OK) {
+        if (MPU6050_ReadRegisters(MPU6050_REG_ACCEL_XOUT_H, raw_buffer, 14, 20) == HAL_OK) {
             int16_t ax_raw = (int16_t)((raw_buffer[0] << 8) | raw_buffer[1]);
             int16_t ay_raw = (int16_t)((raw_buffer[2] << 8) | raw_buffer[3]);
             int16_t az_raw = (int16_t)((raw_buffer[4] << 8) | raw_buffer[5]);
@@ -161,12 +215,23 @@ void MPU6050_Calibrate(void)
 
             sum_gyro_pitch += gx;
             sum_accel_pitch += pitch_acc;
+            valid_samples++;
         }
         HAL_Delay(2);
     }
 
-    s_sensor_data.gyro_pitch_offset = sum_gyro_pitch / (float)CALIBRATION_SAMPLES;
-    s_sensor_data.accel_pitch_offset = sum_accel_pitch / (float)CALIBRATION_SAMPLES;
+    if (valid_samples > 100) {
+        s_sensor_data.gyro_pitch_offset = sum_gyro_pitch / (float)valid_samples;
+
+        // Safety check: Only accept auto zero calibration if robot is held near vertical (< +/-8 deg).
+        // If robot is lying down or resting at kickstand during power-on, do NOT treat tilted angle as zero!
+        float avg_accel = sum_accel_pitch / (float)valid_samples;
+        if (fabsf(avg_accel) <= 8.0f) {
+            s_sensor_data.accel_pitch_offset = avg_accel;
+        } else {
+            s_sensor_data.accel_pitch_offset = MECHANICAL_BALANCE_OFFSET_DEG;
+        }
+    }
 
     // Seed Kalman filter angle with current baseline accelerometer angle
     s_sensor_data.kalman.angle = 0.0f;
@@ -178,8 +243,9 @@ void MPU6050_Update(float dt)
 {
     uint8_t raw_buffer[14];
 
-    if (MPU6050_ReadRegisters(MPU6050_REG_ACCEL_XOUT_H, raw_buffer, 14) != HAL_OK) {
-        return; // Retain previous valid estimate on transient I2C error
+    // Ultra-fast 2ms timeout to never stall the 100Hz (10ms) control loop
+    if (MPU6050_ReadRegisters(MPU6050_REG_ACCEL_XOUT_H, raw_buffer, 14, 2) != HAL_OK) {
+        return; // Retain previous valid estimate on transient I2C glitch
     }
 
     int16_t ax_raw = (int16_t)((raw_buffer[0] << 8) | raw_buffer[1]);
@@ -208,6 +274,18 @@ void MPU6050_Update(float dt)
     // 1D Kalman Filter Fusion
     s_sensor_data.pitch = Kalman_Update(&s_sensor_data.kalman, accel_pitch, gyro_pitch_rate, dt);
     s_sensor_data.gyro_rate = s_sensor_data.kalman.rate;
+}
+
+uint8_t MPU6050_IsConnected(void)
+{
+    return s_is_connected;
+}
+
+void MPU6050_SetZeroOffset(float offset_deg)
+{
+    s_sensor_data.accel_pitch_offset = offset_deg;
+    s_sensor_data.kalman.angle = 0.0f;
+    s_sensor_data.kalman.bias = 0.0f;
 }
 
 float MPU6050_GetPitch(void)

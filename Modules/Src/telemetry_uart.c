@@ -7,6 +7,9 @@
  */
 
 #include "telemetry_uart.h"
+#include "mpu6050_filter.h"
+#include "motor_encoder.h"
+#include "motor_test.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -16,6 +19,7 @@ static UART_HandleTypeDef *s_huart = NULL;
 static uint8_t s_rx_byte_tmp = 0;
 static uint8_t s_is_streaming = 0;
 static uint8_t s_ble_connected = 0;
+static void (*s_rx_hook)(uint8_t) = NULL;
 
 /* Circular Ring Buffer for non-blocking UART RX */
 static uint8_t s_rx_ringbuf[TELEMETRY_RX_BUF_SIZE];
@@ -77,16 +81,126 @@ static void ProcessCommandLine(char *cmd_line)
         return;
     }
 
-    // 3. Status Query
+    // 3. Status Query (Detailed hardware & telemetry status)
     if (strcmp(cmd_line, "STATUS") == 0 || strcmp(cmd_line, "CMD:STATUS") == 0) {
-        char status_buf[80];
-        snprintf(status_buf, sizeof(status_buf), "STATUS:%s,BLE:%u\n",
-                 RobotFSM_GetStateString(), (unsigned int)s_ble_connected);
+        char status_buf[140];
+        const motor_encoder_data_t *enc = MotorEncoder_GetData();
+        snprintf(status_buf, sizeof(status_buf),
+                 "STATUS:STATE=%s,PITCH=%.2f,GYRO=%.2f,SPD=%.2f,ENC_L=%ld,ENC_R=%ld,MPU=%u,BLE=%u\n",
+                 RobotFSM_GetStateString(),
+                 MPU6050_GetPitch(),
+                 MPU6050_GetGyroRate(),
+                 enc->speed_avg_mps,
+                 (long)enc->total_pulses_left,
+                 (long)enc->total_pulses_right,
+                 (unsigned int)MPU6050_IsConnected(),
+                 (unsigned int)s_ble_connected);
         Telemetry_SendString(status_buf);
         return;
     }
 
-    // 4. Telemetry Stream Control
+    // 4. Set Balance Zero Pitch Offset
+    // Format: CALIB_ZERO (auto capture current angle) or CALIB_ZERO:<angle>
+    if (strncmp(cmd_line, "CALIB_ZERO", 10) == 0) {
+        float offset = 0.0f;
+        if (cmd_line[10] == ':') {
+            offset = strtof(cmd_line + 11, NULL);
+        } else {
+            const mpu6050_data_t *imu = MPU6050_GetData();
+            offset = imu->pitch + imu->accel_pitch_offset;
+        }
+        MPU6050_SetZeroOffset(offset);
+        char ack[64];
+        snprintf(ack, sizeof(ack), "OK_CALIB_ZERO:offset=%.2f\n", offset);
+        Telemetry_SendString(ack);
+        return;
+    }
+
+    // 5. Motor & Encoder Direction Polarities
+    // Format: SET_POLARITY:<motor_l>,<motor_r>,<enc_l>,<enc_r>
+    if (strncmp(cmd_line, "SET_POLARITY:", 13) == 0) {
+        int ml = 1, mr = -1, el = 1, er = -1;
+        if (sscanf(cmd_line + 13, "%d,%d,%d,%d", &ml, &mr, &el, &er) >= 4) {
+            Motor_SetPolarity((int8_t)ml, (int8_t)mr, (int8_t)el, (int8_t)er);
+            char ack[64];
+            snprintf(ack, sizeof(ack), "OK_POLARITY:%d,%d,%d,%d\n", ml, mr, el, er);
+            Telemetry_SendString(ack);
+        } else {
+            Telemetry_SendString("ERR:SET_POLARITY_SYNTAX\n");
+        }
+        return;
+    }
+
+    // 6. Hardware Motor Diagnostic Tests
+    if (strcmp(cmd_line, "TEST:MOTOR_L") == 0) {
+        Telemetry_SendString("TEST:MOTOR_L_RUN (FWD)\n");
+        Motor_TestRun(1500, 0);
+        HAL_Delay(600);
+        Motor_Disable();
+        Telemetry_SendString("TEST:MOTOR_L_STOP\n");
+        return;
+    }
+    if (strcmp(cmd_line, "TEST:MOTOR_L_REV") == 0) {
+        Telemetry_SendString("TEST:MOTOR_L_RUN (REV)\n");
+        Motor_TestRun(-1500, 0);
+        HAL_Delay(600);
+        Motor_Disable();
+        Telemetry_SendString("TEST:MOTOR_L_STOP\n");
+        return;
+    }
+    if (strcmp(cmd_line, "TEST:MOTOR_R") == 0) {
+        Telemetry_SendString("TEST:MOTOR_R_RUN (FWD)\n");
+        Motor_TestRun(0, 1500);
+        HAL_Delay(600);
+        Motor_Disable();
+        Telemetry_SendString("TEST:MOTOR_R_STOP\n");
+        return;
+    }
+    if (strcmp(cmd_line, "TEST:MOTOR_R_REV") == 0) {
+        Telemetry_SendString("TEST:MOTOR_R_RUN (REV)\n");
+        Motor_TestRun(0, -1500);
+        HAL_Delay(600);
+        Motor_Disable();
+        Telemetry_SendString("TEST:MOTOR_R_STOP\n");
+        return;
+    }
+    if (strcmp(cmd_line, "TEST:MOTORS") == 0) {
+        Telemetry_SendString("TEST:MOTORS_RUN (FWD)\n");
+        Motor_TestRun(1500, 1500);
+        HAL_Delay(800);
+        Motor_Disable();
+        Telemetry_SendString("TEST:MOTORS_STOP\n");
+        return;
+    }
+    if (strcmp(cmd_line, "TEST:MOTORS_REV") == 0) {
+        Telemetry_SendString("TEST:MOTORS_RUN (REV)\n");
+        Motor_TestRun(-1500, -1500);
+        HAL_Delay(800);
+        Motor_Disable();
+        Telemetry_SendString("TEST:MOTORS_STOP\n");
+        return;
+    }
+    if (strncmp(cmd_line, "MOTOR:", 6) == 0) {
+        int pl = 0, pr = 0;
+        if (sscanf(cmd_line + 6, "%d,%d", &pl, &pr) == 2) {
+            Motor_TestRun((int16_t)pl, (int16_t)pr);
+            char resp[48];
+            snprintf(resp, sizeof(resp), "OK_MOTOR:PWM_L=%d,PWM_R=%d\n", pl, pr);
+            Telemetry_SendString(resp);
+            return;
+        }
+    }
+    if (strcmp(cmd_line, "TEST:AUTO") == 0) {
+        Motor_RunAutoTestLoop();
+        return;
+    }
+    if (strcmp(cmd_line, "TEST:STOP") == 0) {
+        Motor_Disable();
+        Telemetry_SendString("TEST:STOPPED\n");
+        return;
+    }
+
+    // 7. Telemetry Stream Control
     if (strncmp(cmd_line, "START_STREAM", 12) == 0) {
         s_is_streaming = 1;
         Telemetry_SendString("STREAM_STARTED\n");
@@ -162,6 +276,7 @@ void Telemetry_Init(UART_HandleTypeDef *huart)
     s_ble_connected = 0;
 
     Telemetry_StartReceiveIT();
+    Telemetry_SendString("\n[SYS] STM32F401 Self-Balancing Robot Initialized.\n");
 }
 
 void Telemetry_StartReceiveIT(void)
@@ -171,8 +286,21 @@ void Telemetry_StartReceiveIT(void)
     }
 }
 
+void Telemetry_RegisterRxHook(void (*hook)(uint8_t))
+{
+    s_rx_hook = hook;
+}
+
 void Telemetry_OnRxByte(uint8_t byte)
 {
+    if (s_rx_hook != NULL) {
+        s_rx_hook(byte);
+        if (s_huart != NULL) {
+            HAL_UART_Receive_IT(s_huart, &s_rx_byte_tmp, 1);
+        }
+        return;
+    }
+
     uint16_t next_head = (s_rx_head + 1) % TELEMETRY_RX_BUF_SIZE;
     if (next_head != s_rx_tail) {
         s_rx_ringbuf[s_rx_head] = byte;
@@ -187,6 +315,11 @@ void Telemetry_OnRxByte(uint8_t byte)
 
 void Telemetry_ProcessIncoming(void)
 {
+    // Auto-revive UART RX if it got stalled due to line noise or overrun error
+    if (s_huart != NULL && s_huart->RxState == HAL_UART_STATE_READY) {
+        HAL_UART_Receive_IT(s_huart, &s_rx_byte_tmp, 1);
+    }
+
     while (s_rx_tail != s_rx_head) {
         uint8_t ch = s_rx_ringbuf[s_rx_tail];
         s_rx_tail = (s_rx_tail + 1) % TELEMETRY_RX_BUF_SIZE;
@@ -260,5 +393,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (s_huart != NULL && huart->Instance == s_huart->Instance) {
         Telemetry_OnRxByte(s_rx_byte_tmp);
+    }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (s_huart != NULL && huart->Instance == s_huart->Instance) {
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        __HAL_UART_CLEAR_NEFLAG(huart);
+        __HAL_UART_CLEAR_FEFLAG(huart);
+        __HAL_UART_CLEAR_PEFLAG(huart);
+        HAL_UART_Receive_IT(s_huart, &s_rx_byte_tmp, 1);
     }
 }

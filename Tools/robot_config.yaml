@@ -17,6 +17,11 @@ motor:
   gear_ratio: 30.0      # Tỷ số truyền hộp số GA25
   voltage_nominal: 11.1 # Điện áp danh định pin LiPo 3S (V)
   rpm_max: 280.0        # Vận tốc không tải ở 11.1V (RPM)
+  motor_left_polarity: 1      # Chiều quay động cơ trái (+1: chuẩn, -1: đảo chiều)
+  motor_right_polarity: -1    # Chiều quay động cơ phải (-1: đảo do lắp đối xứng)
+  encoder_left_polarity: 1    # Hướng đếm encoder trái (+1: tiến đếm tăng, -1: đếm giảm)
+  encoder_right_polarity: -1  # Hướng đếm encoder phải (-1: tiến đếm tăng do lắp đối xứng)
+  mechanical_balance_offset: 0.0 # Góc lệch trọng tâm cân bằng cơ học (độ)
 
 control:
   control_dt: 0.01      # Chu kỳ ngắt định thời TIM10: 10ms (100Hz)

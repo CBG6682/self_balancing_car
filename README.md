@@ -137,22 +137,29 @@ self_balancing_car/
 │   ├── Inc/
 │   │   ├── pid_AutoConfig.h    # File tham số PID tự động sinh bởi Python
 │   │   ├── cascade_pid.h       # Khai báo cấu trúc & hàm Cascade PID
+│   │   ├── motor_test.h        # Khai báo module kiểm tra động cơ độc lập
 │   │   ├── mpu6050_filter.h    # Khai báo driver MPU6050 & Lọc Kalman
 │   │   ├── motor_encoder.h     # Khai báo driver TB6612 & Encoder 4x
 │   │   ├── robot_fsm.h         # Khai báo máy trạng thái hữu hạn FSM
 │   │   └── telemetry_uart.h    # Khai báo ring buffer UART & parser lệnh
 │   └── Src/
 │       ├── cascade_pid.c       # Hiện thực vòng lặp PID kép & chống bão hòa
+│       ├── motor_test.c        # Hiện thực chu trình kiểm tra động cơ tự động
 │       ├── mpu6050_filter.c    # Hiện thực giao tiếp I2C1 & Kalman 1D
 │       ├── motor_encoder.c     # Hiện thực điều khiển động cơ & bù deadzone
 │       ├── robot_fsm.c         # Hiện thực logic chuyển trạng thái FSM
 │       └── telemetry_uart.c    # Hiện thực ngắt nhận USART1 & Telemetry
-└── Tools/                      # Bộ công cụ mô phỏng & tối ưu hóa PID (Python)
+└── Tools/                      # Bộ công cụ kiểm tra module, mô phỏng & tối ưu PID
+    ├── MODULE_TEST_GUIDE.md    # Hướng dẫn chi tiết kiểm tra độc lập từng module phần cứng
     ├── requirements.txt        # Danh sách thư viện Python cần thiết
     ├── robot_config.yaml       # File cấu hình thông số vật lý của khung xe
     ├── computed_gains.json     # Cache lưu trữ bộ thông số PID tối ưu
-    ├── mock_telemetry.csv      # File dữ liệu mô phỏng Runge-Kutta 4
-    ├── test_result_plot.png    # Đồ thị kiểm thử kịch bản tự động
+    ├── flash_hid.py            # Công cụ nạp firmware USB HID (không cần ST-Link)
+    ├── test_esp32_loopback.py  # Test độc lập cổng ESP32 & chân GPIO 4/5
+    ├── test_bridge_live.py     # Test thông tuyến thời gian thực ESP32 <-> STM32
+    ├── sensor_test_live.py     # Bảng theo dõi cảm biến MPU6050 & Encoder thời gian thực
+    ├── motor_test_interactive.py # Bảng điều khiển tương tác kiểm tra động cơ TB6612
+    ├── hardware_check.py       # Bộ chẩn đoán, cân chỉnh Zero Trim & Polarity toàn diện
     ├── sim_and_init_pid.py      # Giải LQR & khởi tạo PID có cache
     ├── data_acquisition.py      # Thu thập UART hoặc sinh Mock RK4
     ├── auto_tune_pid.py         # Nhận dạng ARX & Nelder-Mead ITAE
@@ -255,6 +262,21 @@ Khi bạn chế tạo khung xe mới, thay pin có trọng lượng khác hoặc
    ```
 3. Nạp file `build/Debug/self_balancing_car.bin` mới sinh vào STM32. Robot sẽ tự động đạt trạng thái cân bằng tối ưu!
 
+### Kiểm Tra Phần Cứng Trực Quan & Tune Thực Tế Với Xe Thật:
+Sau khi đấu nối dây vào xe, bạn có thể kích hoạt công cụ tương tác phần cứng:
+```bash
+./run_pipeline.sh --hardware
+# hoặc chạy trực tiếp bằng python:
+./venv/bin/python3 Tools/hardware_check.py
+```
+Bộ công cụ cung cấp:
+- **Thước đo góc nghiêng ASCII thời gian thực**: Xác thực góc Pitch MPU6050 tăng khi nghiêng tới và giảm khi nghiêng lui.
+- **Bộ đếm xung Encoder trực tiếp**: Lăn bánh xe để xác nhận chiều đếm encoder chuẩn xác.
+- **Phát xung thử chiều quay động cơ an toàn**: Kiểm tra chiều quay của 2 bánh xe GA25.
+- **Đảo chiều Polarity tức thì (Hot Swap)**: Tùy chỉnh chiều động cơ/encoder trực tiếp trong RAM qua UART.
+- **Căn chỉnh điểm 0° thăng bằng cơ học (Zero Balance Trim)**: Khử lệch do trọng tâm pin/khung xe.
+- **Thu thập Telemetry thực tế & Tối ưu hóa Nelder-Mead**: Tự động nhận dạng mô hình ARX từ dữ liệu xe thật và nạp PID tối ưu.
+
 ---
 
 ## 9. ĐẶC TẢ GIAO THỨC TELEMETRY UART & BLUETOOTH BLE (ESP32-S3)
@@ -269,7 +291,10 @@ Hệ thống sử dụng **ESP32-S3 DevKitC** làm mạch cầu nối **Bluetoot
 ### Lệnh gửi từ App Bluetooth (BLE) / Máy tính tới STM32:
 - `PING\n`: Bắt tay kết nối (STM32 phản hồi `PONG\n`).
 - `ESP:PING\n`: Bắt tay từ bo mạch cầu nối ESP32-S3 (STM32 phản hồi `ESP:PONG\n`).
-- `STATUS\n` hoặc `CMD:STATUS\n`: Truy vấn trạng thái máy FSM và trạng thái kết nối BLE.
+- `STATUS\n` hoặc `CMD:STATUS\n`: Truy vấn trạng thái chi tiết hệ thống (FSM, Pitch, Gyro, Vận tốc, Xung Encoder trái/phải, MPU alive, BLE connected).
+- `CALIB_ZERO\n` hoặc `CALIB_ZERO:<offset>\n`: Lưu góc cân bằng trọng tâm cơ học tự nhiên của xe.
+- `SET_POLARITY:<ml>,<mr>,<el>,<er>\n`: Đảo chiều quay động cơ và encoder trực tiếp trong RAM (ví dụ: `SET_POLARITY:1,-1,1,-1\n`).
+- `TEST:MOTORS\n`, `TEST:MOTOR_L\n`, `TEST:MOTOR_R\n`: Thử nghiệm xung quay an toàn (0.5s @ 1200 PWM) để kiểm tra đấu nối phần cứng động cơ.
 - `BLE:CONNECTED\n`: Sự kiện khi điện thoại kết nối BLE (STM32 xác nhận `OK_BLE:CONNECTED\n`).
 - `BLE:DISCONNECTED\n`: **Cơ chế an toàn (Fail-safe)**: Khi ngắt kết nối BLE, ESP32-S3 lập tức gửi lệnh này để STM32 tự động phanh gấp (`CMD_STOP`) giữ xe thăng bằng đứng yên.
 - `START_STREAM\n`: Bật chế độ phát dữ liệu Telemetry định kỳ 10ms.

@@ -39,7 +39,9 @@ extern "C" {
 void MX_GPIO_Init(void);
 
 /* USER CODE BEGIN Prototypes */
-
+void Board_LED_Init(void);
+void Board_LED_Toggle(void);
+void Board_LED_Set(uint8_t state);
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

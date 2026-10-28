@@ -11,11 +11,19 @@
 
 #define PI_CONST                3.14159265358979323846f
 
-/* Inversion polarity flags in case motor/encoder wires are swapped */
+/* Inversion polarity flags fallback from pid_AutoConfig.h if not defined */
+#ifndef MOTOR_LEFT_POLARITY
 #define MOTOR_LEFT_POLARITY     (+1)
-#define MOTOR_RIGHT_POLARITY    (+1)
+#endif
+#ifndef MOTOR_RIGHT_POLARITY
+#define MOTOR_RIGHT_POLARITY    (-1)
+#endif
+#ifndef ENCODER_LEFT_POLARITY
 #define ENCODER_LEFT_POLARITY   (+1)
-#define ENCODER_RIGHT_POLARITY  (+1)
+#endif
+#ifndef ENCODER_RIGHT_POLARITY
+#define ENCODER_RIGHT_POLARITY  (-1)
+#endif
 
 /* Private module state */
 static TIM_HandleTypeDef *s_htim_pwm   = NULL;
@@ -65,6 +73,10 @@ void MotorEncoder_Init(TIM_HandleTypeDef *htim_pwm, TIM_HandleTypeDef *htim_enc_
 
     memset(&s_motor_data, 0, sizeof(motor_encoder_data_t));
     s_motor_data.deadzone = PWM_DEADZONE_DEFAULT;
+    s_motor_data.motor_left_polarity  = MOTOR_LEFT_POLARITY;
+    s_motor_data.motor_right_polarity = MOTOR_RIGHT_POLARITY;
+    s_motor_data.enc_left_polarity    = ENCODER_LEFT_POLARITY;
+    s_motor_data.enc_right_polarity   = ENCODER_RIGHT_POLARITY;
 
     // 1. Start Encoder Counters (TIM2 and TIM3)
     if (s_htim_enc_l != NULL) {
@@ -99,8 +111,8 @@ void MotorEncoder_Update(float dt)
     uint16_t curr_cnt_r = (uint16_t)__HAL_TIM_GET_COUNTER(s_htim_enc_r);
 
     // Compute signed 16-bit difference to automatically handle 0 <-> 65535 roll-over
-    int16_t delta_l = (int16_t)(curr_cnt_l - s_last_cnt_l) * ENCODER_LEFT_POLARITY;
-    int16_t delta_r = (int16_t)(curr_cnt_r - s_last_cnt_r) * ENCODER_RIGHT_POLARITY;
+    int16_t delta_l = (int16_t)(curr_cnt_l - s_last_cnt_l) * s_motor_data.enc_left_polarity;
+    int16_t delta_r = (int16_t)(curr_cnt_r - s_last_cnt_r) * s_motor_data.enc_right_polarity;
 
     s_last_cnt_l = curr_cnt_l;
     s_last_cnt_r = curr_cnt_r;
@@ -138,8 +150,8 @@ void Motor_SetOutput(int16_t left_pwm, int16_t right_pwm)
     }
 
     // Apply polarity
-    left_pwm  *= MOTOR_LEFT_POLARITY;
-    right_pwm *= MOTOR_RIGHT_POLARITY;
+    left_pwm  *= s_motor_data.motor_left_polarity;
+    right_pwm *= s_motor_data.motor_right_polarity;
 
     // Saturate input commands
     if (left_pwm > PWM_MAX_LIMIT)   left_pwm = PWM_MAX_LIMIT;
@@ -237,6 +249,28 @@ void MotorEncoder_ResetCounters(void)
     if (s_htim_enc_r != NULL) {
         s_last_cnt_r = (uint16_t)__HAL_TIM_GET_COUNTER(s_htim_enc_r);
     }
+}
+
+void Motor_SetPolarity(int8_t ml, int8_t mr, int8_t el, int8_t er)
+{
+    if (ml == 1 || ml == -1) s_motor_data.motor_left_polarity = ml;
+    if (mr == 1 || mr == -1) s_motor_data.motor_right_polarity = mr;
+    if (el == 1 || el == -1) s_motor_data.enc_left_polarity = el;
+    if (er == 1 || er == -1) s_motor_data.enc_right_polarity = er;
+}
+
+void Motor_GetPolarity(int8_t *ml, int8_t *mr, int8_t *el, int8_t *er)
+{
+    if (ml) *ml = s_motor_data.motor_left_polarity;
+    if (mr) *mr = s_motor_data.motor_right_polarity;
+    if (el) *el = s_motor_data.enc_left_polarity;
+    if (er) *er = s_motor_data.enc_right_polarity;
+}
+
+void Motor_TestRun(int16_t pwm_l, int16_t pwm_r)
+{
+    Motor_Enable();
+    Motor_SetOutput(pwm_l, pwm_r);
 }
 
 const motor_encoder_data_t* MotorEncoder_GetData(void)

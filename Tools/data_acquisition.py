@@ -240,22 +240,37 @@ def probe_and_collect_real_hardware(config_path: str, output_file: str = REAL_CS
         port_name = port_info.device
         print(f"\r  -> Thử bắt tay PING/PONG trên {port_name} ({port_info.description})...", end="", flush=True)
         try:
-            ser = serial.Serial(port_name, baudrate=baudrate, timeout=0.8)
-            time.sleep(0.3)
+            ser = serial.Serial()
+            ser.port = port_name
+            ser.baudrate = baudrate
+            ser.timeout = 0.8
+            ser.dtr = False
+            ser.rts = False
+            ser.open()
+
+            # Allow ESP32 / USB-UART bridge to settle and flush any boot banner
+            time.sleep(1.2)
             ser.reset_input_buffer()
             ser.reset_output_buffer()
 
-            # Send PING handshake
-            ser.write(b"PING\n")
-            ser.flush()
+            # Send PING handshake with retries
+            for attempt in range(4):
+                ser.write(b"PING\nSTATUS\n")
+                ser.flush()
+                for _ in range(5):
+                    reply = ser.readline().decode("utf-8", errors="ignore").strip()
+                    if "PONG" in reply or reply.startswith("STATUS:") or "STM32F401" in reply:
+                        print()  # newline after \r
+                        logger.success(f"Mạch STM32 đã phản hồi trên cổng {port_name}!")
+                        connected_ser = ser
+                        target_port = port_name
+                        break
+                    time.sleep(0.05)
+                if connected_ser is not None:
+                    break
+                time.sleep(0.3)
 
-            # Read response
-            reply = ser.readline().decode("utf-8", errors="ignore").strip()
-            if "PONG" in reply:
-                print()  # newline after \r
-                logger.success(f"Mạch STM32 đã phản hồi 'PONG' trên cổng {port_name}!")
-                connected_ser = ser
-                target_port = port_name
+            if connected_ser is not None:
                 break
             else:
                 ser.close()

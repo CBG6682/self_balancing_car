@@ -43,8 +43,8 @@
 #define STM32_UART_NUM          1
 
 // Hardware UART pins connected to STM32 USART1 (PA9/PA10)
-#define PIN_TO_STM32_RX         4   // ESP32-S3 TX1 -> STM32 PA10 (USART1 RX)
-#define PIN_FROM_STM32_TX       5   // ESP32-S3 RX1 <- STM32 PA9  (USART1 TX)
+#define PIN_TO_STM32_RX         4    // ESP32-S3 TX1 -> STM32 PA10 (USART1 RX)
+#define PIN_FROM_STM32_TX       18   // ESP32-S3 RX1 <- STM32 PA9  (USART1 TX)
 
 // Device Advertising Name
 #define BLE_DEVICE_NAME         "STM32_Balance_Car"
@@ -184,12 +184,12 @@ void setup() {
  * Arduino Main Loop
  * -------------------------------------------------------------------------- */
 void loop() {
-    // Forward incoming data from STM32 UART1 -> Phone (BLE Notify)
+    // Forward incoming data from STM32 UART1 -> Phone (BLE Notify) & PC USB
     while (Serial1.available()) {
         uint8_t c = (uint8_t)Serial1.read();
 
-        // Echo telemetry to PC debug console if desired
-        // Serial.write(c);
+        // Echo telemetry to PC USB debug console for real-time PC tuning & hardware check
+        Serial.write(c);
 
         if (deviceConnected) {
             ble_tx_buffer[ble_tx_idx++] = c;

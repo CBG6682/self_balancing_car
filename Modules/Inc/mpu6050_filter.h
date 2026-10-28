@@ -14,6 +14,11 @@ extern "C" {
 #endif
 
 #include "main.h"
+#include "pid_AutoConfig.h"
+
+#ifndef MECHANICAL_BALANCE_OFFSET_DEG
+#define MECHANICAL_BALANCE_OFFSET_DEG (0.0f)
+#endif
 
 /* -----------------------------------------------------------------------------
  * MPU6050 I2C Configuration
@@ -97,6 +102,24 @@ float MPU6050_GetPitch(void);
  * @retval Angular rate (deg/s)
  */
 float MPU6050_GetGyroRate(void);
+
+/**
+ * @brief  Hardware I2C bus recovery routine (toggles SCL 9 times if SDA stuck LOW).
+ *         Call before MX_I2C1_Init() or before MPU6050_Init().
+ */
+void MPU6050_I2C_BusClear(void);
+
+/**
+ * @brief  Check if MPU6050 successfully initialized and communication is active.
+ * @retval 1 if connected and responding, 0 otherwise
+ */
+uint8_t MPU6050_IsConnected(void);
+
+/**
+ * @brief  Set mechanical balance pitch zero offset in degrees.
+ * @param  offset_deg: Pitch offset (subtracted from raw accelerometer pitch)
+ */
+void MPU6050_SetZeroOffset(float offset_deg);
 
 /**
  * @brief  Get pointer to the full MPU6050 data structure.

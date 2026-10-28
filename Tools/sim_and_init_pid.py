@@ -224,6 +224,15 @@ extern "C" {{
 #define MAX_TARGET_ANGLE_DEG        {float(ctrl['max_target_angle']):.1f}f
 #define MAX_TARGET_SPEED_MPS        {float(ctrl['max_target_speed']):.2f}f
 
+/* -----------------------------------------------------------------------------
+ * Motor & Encoder Direction Polarities (+1 or -1) & Balance Offset
+ * -------------------------------------------------------------------------- */
+#define MOTOR_LEFT_POLARITY         ({int(motor.get('motor_left_polarity', 1)):+d})
+#define MOTOR_RIGHT_POLARITY        ({int(motor.get('motor_right_polarity', -1)):+d})
+#define ENCODER_LEFT_POLARITY       ({int(motor.get('encoder_left_polarity', 1)):+d})
+#define ENCODER_RIGHT_POLARITY      ({int(motor.get('encoder_right_polarity', -1)):+d})
+#define MECHANICAL_BALANCE_OFFSET_DEG ({float(motor.get('mechanical_balance_offset', 0.0)):.2f}f)
+
 #ifdef __cplusplus
 }}
 #endif

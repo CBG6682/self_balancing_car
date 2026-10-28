@@ -46,6 +46,12 @@ void Telemetry_Init(UART_HandleTypeDef *huart);
 void Telemetry_StartReceiveIT(void);
 
 /**
+ * @brief  Đăng ký hàm hook chặn byte thô (dành riêng cho chế độ loopback test).
+ * @param  hook: Con trỏ hàm nhận byte
+ */
+void Telemetry_RegisterRxHook(void (*hook)(uint8_t));
+
+/**
  * @brief  Interrupt service callback when a new byte arrives on USART1.
  *         Must be invoked from HAL_UART_RxCpltCallback or USART1_IRQHandler.
  * @param  byte: Received character
