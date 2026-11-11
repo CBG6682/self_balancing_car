@@ -22,6 +22,10 @@ def auto_detect_port():
     if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         return sys.argv[1]
     ports = list(serial.tools.list_ports.comports())
+    # Prioritize Espressif ESP32-S3 (VID: 0x303a)
+    for p in ports:
+        if p.vid == 0x303a:
+            return p.device
     phys = logger.filter_physical_ports(ports)
     if phys:
         return phys[0].device
@@ -35,11 +39,11 @@ def main():
     print(" KIỂM TRA THÔNG TUYẾN ESP32-S3 <---> STM32 THỜI GIAN THỰC")
     print(f" Cổng: {port_name} @ {BAUD} bps")
     print("=" * 65)
-    print(" HƯỚNG DẪN KIỂM TRA:")
-    print("  • ESP32 Chân 4 (TX) ---> STM32 Chân A10 (RX)")
-    print("  • ESP32 Chân 5 (RX) <--- STM32 Chân A9  (TX)")
+    print(" KẾT NỐI PHẦN CỨNG ĐÃ XÁC THỰC:")
+    print("  • ESP32 GPIO 6 (TX) ---> STM32 Chân PA10 (RX)")
+    print("  • ESP32 GPIO 8 (RX) <--- STM32 Chân PA9  (TX)")
     print("  • ESP32 GND        <---> STM32 GND")
-    print("  • Mẹo: Bấm nhả nút NRST (Reset) trên STM32 để xem dòng boot ([SYS] MPU6050: OK)")
+    print("  • Mẹo: Bấm nhả nút NRST (Reset) trên STM32 để xem dòng boot")
     print("  • (Bấm Ctrl+C để dừng lại)\n")
 
     try:
@@ -98,7 +102,7 @@ def main():
             logger.success(f"Thông tuyến hoàn hảo! Nhận được {pong_count} phản hồi PONG.")
         else:
             logger.warn(f"Đã gửi {ping_count} gói PING nhưng chưa nhận được PONG.")
-            print("  -> Thử đổi chéo 2 đầu dây ở chân 4 và chân 5 trên ESP32.")
+            print("  -> Thử đổi chéo 2 đầu dây ở chân 4 và chân 18 trên ESP32.")
     finally:
         ser.close()
 

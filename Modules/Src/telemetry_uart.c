@@ -30,6 +30,21 @@ static volatile uint16_t s_rx_tail = 0;
 static char s_line_buf[TELEMETRY_CMD_LINE_SIZE];
 static uint16_t s_line_idx = 0;
 
+/* Lightweight embedded float formatter to avoid newlib-nano printf_float heap/stack overhead */
+static void format_float(char *out, size_t out_sz, float val, int decimals)
+{
+    long factor = 1;
+    for (int i = 0; i < decimals; i++) factor *= 10;
+    long total = (long)(val * factor);
+    if (val < 0 && total == 0) {
+        snprintf(out, out_sz, "-0.%0*lu", decimals, 0UL);
+    } else {
+        long int_part = total / factor;
+        long frac_part = labs(total % factor);
+        snprintf(out, out_sz, "%ld.%0*lu", int_part, decimals, frac_part);
+    }
+}
+
 /* -----------------------------------------------------------------------------
  * Private Command Parser
  * -------------------------------------------------------------------------- */
@@ -85,12 +100,16 @@ static void ProcessCommandLine(char *cmd_line)
     if (strcmp(cmd_line, "STATUS") == 0 || strcmp(cmd_line, "CMD:STATUS") == 0) {
         char status_buf[140];
         const motor_encoder_data_t *enc = MotorEncoder_GetData();
+        char s_pitch[16], s_gyro[16], s_spd[16];
+        format_float(s_pitch, sizeof(s_pitch), MPU6050_GetPitch(), 2);
+        format_float(s_gyro, sizeof(s_gyro), MPU6050_GetGyroRate(), 2);
+        format_float(s_spd, sizeof(s_spd), enc->speed_avg_mps, 2);
         snprintf(status_buf, sizeof(status_buf),
-                 "STATUS:STATE=%s,PITCH=%.2f,GYRO=%.2f,SPD=%.2f,ENC_L=%ld,ENC_R=%ld,MPU=%u,BLE=%u\n",
+                 "STATUS:STATE=%s,PITCH=%s,GYRO=%s,SPD=%s,ENC_L=%ld,ENC_R=%ld,MPU=%u,BLE=%u\n",
                  RobotFSM_GetStateString(),
-                 MPU6050_GetPitch(),
-                 MPU6050_GetGyroRate(),
-                 enc->speed_avg_mps,
+                 s_pitch,
+                 s_gyro,
+                 s_spd,
                  (long)enc->total_pulses_left,
                  (long)enc->total_pulses_right,
                  (unsigned int)MPU6050_IsConnected(),
@@ -346,9 +365,13 @@ void Telemetry_SendData(float angle, float gyro, int16_t pwm,
 {
     if (s_huart == NULL) return;
 
+    char s_ang[16], s_gyr[16];
+    format_float(s_ang, sizeof(s_ang), angle, 2);
+    format_float(s_gyr, sizeof(s_gyr), gyro, 2);
+
     char tx_buf[96];
-    int len = snprintf(tx_buf, sizeof(tx_buf), "DATA:%.2f,%.2f,%d,%ld,%ld,%u\n",
-                       angle, gyro, (int)pwm, (long)enc_left, (long)enc_right, (unsigned int)state);
+    int len = snprintf(tx_buf, sizeof(tx_buf), "DATA:%s,%s,%d,%ld,%ld,%u\n",
+                       s_ang, s_gyr, (int)pwm, (long)enc_left, (long)enc_right, (unsigned int)state);
 
     if (len > 0) {
         HAL_UART_Transmit(s_huart, (uint8_t*)tx_buf, (uint16_t)len, 10);
@@ -380,9 +403,12 @@ uint8_t Telemetry_IsBLEConnected(void)
 void Telemetry_SendStatus(float angle, float speed, uint8_t state)
 {
     if (s_huart == NULL) return;
+    char s_ang[16], s_spd[16];
+    format_float(s_ang, sizeof(s_ang), angle, 2);
+    format_float(s_spd, sizeof(s_spd), speed, 2);
     char buf[80];
-    snprintf(buf, sizeof(buf), "STATUS:%.2f,%.2f,%u,BLE:%u\n",
-             angle, speed, (unsigned int)state, (unsigned int)s_ble_connected);
+    snprintf(buf, sizeof(buf), "STATUS:%s,%s,%u,BLE:%u\n",
+             s_ang, s_spd, (unsigned int)state, (unsigned int)s_ble_connected);
     Telemetry_SendString(buf);
 }
 

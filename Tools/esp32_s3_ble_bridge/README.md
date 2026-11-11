@@ -26,7 +26,7 @@ Bo mạch ESP32-S3 DevKitC được cắm rời và giao tiếp với STM32 qua 
  |   ESP32-S3 DevKitC-1     |                 |  STM32F401CCU6 BlackPill |
  |                          |                 |                          |
  |  GPIO 4 (UART1 TX)       |---------------->|  PA10 (USART1 RX)        |
- |  GPIO 5 (UART1 RX)       |<----------------|  PA9  (USART1 TX)        |
+ |  GPIO 18 (UART1 RX)      |<----------------|  PA9  (USART1 TX)        |
  |  GND                     |<--------------->|  GND  (Mass chung)       |
  |  5V (hoặc VIN)           |<--- 5V Pin/BEC -|  5V   (Nguồn Buck LM2596)|
  +--------------------------+                 +--------------------------+

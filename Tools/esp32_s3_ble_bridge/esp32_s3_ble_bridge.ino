@@ -9,8 +9,8 @@
  * Replaces legacy HC-05 classic Bluetooth module with modern Bluetooth 5.0 LE.
  * 
  * Hardware Connections:
- * - ESP32-S3 GPIO 4 (UART1 TX) ---> STM32F401 PA10 (USART1 RX)
- * - ESP32-S3 GPIO 5 (UART1 RX) <--- STM32F401 PA9  (USART1 TX)
+ * - ESP32-S3 GPIO 4 (UART1 TX)  ---> STM32F401 PA10 (USART1 RX)
+ * - ESP32-S3 GPIO 18 (UART1 RX) <--- STM32F401 PA9  (USART1 TX)
  * - ESP32-S3 GND               <---> STM32F401 GND  (Common Ground)
  * - ESP32-S3 5V (or VIN)       <--- External 5V rail / Buck converter
  * 
@@ -43,8 +43,8 @@
 #define STM32_UART_NUM          1
 
 // Hardware UART pins connected to STM32 USART1 (PA9/PA10)
-#define PIN_TO_STM32_RX         4    // ESP32-S3 TX1 -> STM32 PA10 (USART1 RX)
-#define PIN_FROM_STM32_TX       18   // ESP32-S3 RX1 <- STM32 PA9  (USART1 TX)
+#define PIN_TO_STM32_RX         6    // ESP32-S3 TX1 (GPIO 6) -> STM32 PA10 (USART1 RX)
+#define PIN_FROM_STM32_TX       8    // ESP32-S3 RX1 (GPIO 8) <- STM32 PA9  (USART1 TX)
 
 // Device Advertising Name
 #define BLE_DEVICE_NAME         "STM32_Balance_Car"
@@ -184,6 +184,14 @@ void setup() {
  * Arduino Main Loop
  * -------------------------------------------------------------------------- */
 void loop() {
+    // 1. Periodically query STM32 every 1 second
+    static unsigned long last_query = 0;
+    if (millis() - last_query >= 1000) {
+        last_query = millis();
+        Serial1.print("PING_STM32_CHALLENGE\n");
+        Serial1.flush();
+    }
+
     // Forward incoming data from STM32 UART1 -> Phone (BLE Notify) & PC USB
     while (Serial1.available()) {
         uint8_t c = (uint8_t)Serial1.read();
@@ -222,5 +230,6 @@ void loop() {
     while (Serial.available()) {
         uint8_t usb_char = Serial.read();
         Serial1.write(usb_char);
+        Serial1.flush();
     }
 }

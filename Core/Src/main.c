@@ -54,7 +54,7 @@
  *     1: Chế độ kiểm tra động cơ tự động 6 pha
  *     0: Tắt
  * ============================================================================== */
-#define RUN_UART_LOOPBACK_TEST 1
+#define RUN_UART_LOOPBACK_TEST 0
 #define RUN_MOTOR_TEST_MODE    0
 /* USER CODE END PD */
 
@@ -89,7 +89,7 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
   /* Relocate Interrupt Vector Table to match WeAct HID Bootloader offset (0x08004000) */
-  SCB->VTOR = 0x08004000;
+  SCB->VTOR = FLASH_BASE;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/

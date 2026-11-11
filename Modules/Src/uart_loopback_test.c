@@ -60,6 +60,16 @@ void UART_Loopback_Test_Run(void)
     while (1) {
         uint32_t now = HAL_GetTick();
 
+        // Tự động khôi phục nếu UART bị lỗi ORE/FE do rút cắm dây hoặc chớp xung
+        if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_ORE) ||
+            __HAL_UART_GET_FLAG(&huart1, UART_FLAG_FE) ||
+            __HAL_UART_GET_FLAG(&huart1, UART_FLAG_NE)) {
+            __HAL_UART_CLEAR_OREFLAG(&huart1);
+            __HAL_UART_CLEAR_FEFLAG(&huart1);
+            __HAL_UART_CLEAR_NEFLAG(&huart1);
+            Telemetry_StartReceiveIT();
+        }
+
         // ---------------------------------------------------------------------
         // 1. Kiểm tra gói tin nhận về từ chân RX (PA10)
         // ---------------------------------------------------------------------
@@ -106,13 +116,10 @@ void UART_Loopback_Test_Run(void)
         // ---------------------------------------------------------------------
         // 3. Định kỳ mỗi 200ms: Tự động phát "PING\n" qua chân TX (PA9)
         // ---------------------------------------------------------------------
-        if (!waiting_ack && (now - last_tx_tick >= 200)) {
+        if (!waiting_ack && (now - last_tx_tick >= 50)) {
             last_tx_tick = now;
             waiting_ack = 1;
             wait_start_tick = now;
-
-            // Xóa bộ đệm dòng trước khi phát
-            s_rx_idx = 0;
 
             // Phát PING qua chân PA9
             HAL_UART_Transmit(&huart1, (uint8_t*)ping_str, strlen(ping_str), 20);

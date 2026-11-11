@@ -36,7 +36,7 @@
     "theta_normal": 20.0,
     "max_recovery_angle_X": 45.0
   },
-  "tuned_timestamp": "2026-10-27T19:42:42.122343",
+  "tuned_timestamp": "2026-11-11T11:26:29.560368",
   "system_identification": {
     "r2_score": 0.9943,
     "arx_a1": 0.2065,

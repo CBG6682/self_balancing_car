@@ -16,7 +16,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 sys.path.insert(0, SCRIPT_DIR)
 import logger_utils as logger
 
-FLASH_BASE_ADDR = "0x08004000"
+FLASH_BASE_ADDR = "0x08000000"
 DEFAULT_BIN = os.path.join(PROJECT_ROOT, "build", "Debug", "self_balancing_car.bin")
 DEFAULT_ELF = os.path.join(PROJECT_ROOT, "build", "Debug", "self_balancing_car.elf")
 DEFAULT_HEX = os.path.join(PROJECT_ROOT, "build", "Debug", "self_balancing_car.hex")

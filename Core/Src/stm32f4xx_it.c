@@ -22,6 +22,7 @@
 #include "stm32f4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "telemetry_uart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -219,11 +220,21 @@ void TIM1_UP_TIM10_IRQHandler(void)
 void USART1_IRQHandler(void)
 {
   /* USER CODE BEGIN USART1_IRQn 0 */
-
+  if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_ORE)) {
+    __HAL_UART_CLEAR_OREFLAG(&huart1);
+  }
+  if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_FE)) {
+    __HAL_UART_CLEAR_FEFLAG(&huart1);
+  }
+  if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_NE)) {
+    __HAL_UART_CLEAR_NEFLAG(&huart1);
+  }
   /* USER CODE END USART1_IRQn 0 */
   HAL_UART_IRQHandler(&huart1);
   /* USER CODE BEGIN USART1_IRQn 1 */
-
+  if (huart1.RxState == HAL_UART_STATE_READY) {
+    Telemetry_StartReceiveIT();
+  }
   /* USER CODE END USART1_IRQn 1 */
 }
 

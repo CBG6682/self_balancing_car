@@ -6,8 +6,8 @@ Tests every component step-by-step with interactive user confirmation before eac
 
 Components Tested:
 1. USB Serial Port & ESP32-S3 Bridge
-2. STM32 Physical UART Handshake (PING/PONG)
-3. MPU6050 6-DOF IMU & I2C Bus (WHO_AM_I, Pitch Angle, Gyro Rate)
+2. STM32 Physical UART Handshake (PING/PONG & STATUS)
+3. MPU6050 6-DOF IMU & I2C Bus (PB6 SCL / PB7 SDA, Pitch Angle, Gyro Rate)
 4. GA25 Wheel Encoders (TIM2 PA0/PA1, TIM3 PB4/PB5)
 5. TB6612 Dual H-Bridge & Left Motor (PWMA PB8, AIN1 PA4, AIN2 PA5, STBY PB0)
 6. TB6612 Dual H-Bridge & Right Motor (PWMB PB9, BIN1 PA6, BIN2 PA7)
@@ -49,13 +49,37 @@ def safe_input(prompt_text, default=""):
 
 
 def auto_detect_port():
-    """Finds best matching physical COM/tty port or returns None if none found."""
+    """Finds best matching physical COM/tty port, prioritizing ESP32-S3."""
     if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         return sys.argv[1]
+
     ports = list(serial.tools.list_ports.comports())
+
+    # 1. Prioritize Espressif ESP32-S3 (VID: 0x303a)
+    for p in ports:
+        if p.vid == 0x303A:
+            return p.device
+
+    # 2. Prioritize common USB-UART chips
+    for p in ports:
+        desc = (p.description or "").lower()
+        if any(chip in desc for chip in ["ch340", "ch341", "ch343", "cp210", "ftdi", "uart"]):
+            return p.device
+
+    # 3. Filter other physical devices (ignoring mobile phones like Samsung 0x04e8)
     phys = logger.filter_physical_ports(ports)
-    if phys:
-        return phys[0].device
+    for p in phys:
+        if p.vid == 0x04E8:
+            continue
+        return p.device
+
+    # Fallback default
+    if sys.platform == "win32":
+        return "COM3"
+    if os.path.exists("/dev/ttyACM0"):
+        return "/dev/ttyACM0"
+    if os.path.exists("/dev/ttyUSB0"):
+        return "/dev/ttyUSB0"
     return None
 
 
@@ -68,10 +92,12 @@ def scan_usb_hardware():
         "has_stlink": False,
     }
 
-    # 1. Serial ports (filtered to exclude dummy ttyS ports)
+    # 1. Serial ports (filtered to exclude dummy ttyS and phone ports)
     all_com = list(serial.tools.list_ports.comports())
     phys_com = logger.filter_physical_ports(all_com)
     for p in phys_com:
+        if p.vid == 0x04E8:
+            continue  # Ignore Samsung phone modem
         info["serial_ports"].append((p.device, p.description, p.vid, p.pid))
 
     # 2. WeAct HID Bootloader (0483:572a)
@@ -178,8 +204,8 @@ def main():
 
     if hw["has_stm32_dfu"] or hw["has_stm32_hid"]:
         print(f"\n{logger.BOLD_YELLOW}⚠ CHÚ Ý VỀ STM32 BOOTLOADER & CỔNG KẾT NỐI:{logger.RESET}")
-        print("  1. Cáp USB máy tính BẮT BUỘC CẮM VÀO BO ESP32-S3 (chân 4 & 5 sẽ nối sang STM32).")
-        print("     • Cổng Type-C trên STM32 BlackPill KHÔNG có chip USB-Serial -> Không thể giao tiếp Serial.")
+        print("  1. Cáp USB máy tính cắm vào mạch ESP32-S3 DevKitC (cổng UART Native USB CDC).")
+        print("     • ESP32 GPIO 6 nối STM32 PA10 (RX), ESP32 GPIO 8 nối STM32 PA9 (TX).")
         print("  2. Phát hiện STM32 đang ở chế độ Bootloader USB (0483:572a).")
         print("     • Hãy BẤM NHẢ NÚT NRST (Reset) trên STM32 để khởi động vào chương trình chính.")
 
@@ -282,18 +308,17 @@ def main():
                     return
 
         # =====================================================================
-        # BƯỚC 2: ĐƯỜNG TRUYỀN UART VẬT LÝ ESP32 <-> STM32 (TEST LIÊN TỤC)
+        # BƯỚC 2: ĐƯỜNG TRUYỀN UART VẬT LÝ ESP32 <-> STM32
         # =====================================================================
         ans = prompt_user(
             step_num="2/7",
             title="Đường Truyền UART Vật Lý Giữa ESP32-S3 Và STM32 BlackPill",
             instructions=[
-                "Đảm bảo đã nối 3 dây giữa ESP32 và STM32:",
-                "  • ESP32 Chân 4 (TX) ---> STM32 Chân A10 (USART1 RX)",
-                "  • ESP32 Chân 5 (RX) <--- STM32 Chân A9  (USART1 TX)",
+                "Đảm bảo đã nối 3 dây giữa ESP32 và STM32 (chân đã được xác thực):",
+                "  • ESP32 GPIO 6 (TX) ---> STM32 Chân PA10 (USART1 RX)",
+                "  • ESP32 GPIO 8 (RX) <--- STM32 Chân PA9  (USART1 TX)",
                 "  • ESP32 GND        <---> STM32 GND      (Bắt buộc chung Mass)",
-                "Chương trình sẽ LIÊN TỤC GỬI PING cho tới khi NHẬN ĐƯỢC TÍN HIỆU ĐẦU TIÊN từ STM32.",
-                "Trong lúc quét: Hãy BẤM NHẢ NÚT NRST trên STM32 hoặc tráo đổi 2 dây 4 & 5."
+                "Chương trình sẽ gửi lệnh PING và truy vấn STATUS từ STM32 qua ESP32-S3 Bridge."
             ]
         )
         if ans == "cancel":
@@ -306,14 +331,8 @@ def main():
                 test_results[STEP_2] = "BLOCKED"
             else:
                 print("\n" + "┌" + "─" * 68 + "┐")
-                print(f"│ {logger.BOLD_CYAN}BẮT ĐẦU CHẾ ĐỘ QUÉT VÀ DÒ TÌM TÍN HIỆU STM32 LIÊN TỤC{logger.RESET}{' ' * 16}│")
-                print("│  • Đang liên tục gửi lệnh bắt tay 'PING\\n' và lắng nghe phản hồi... │")
-                print("│  • CÁC THAO TÁC CẦN LÀM TRÊN PHẦN CỨNG NGAY BÂY GIỜ:               │")
-                print("│    1. BẤM NHẢ NÚT NRST (Reset) trên mạch STM32 BlackPill.          │")
-                print("│    2. Kiểm tra/Tráo đổi 2 dây: Chân 4 (TX) -> A10, Chân 5 (RX) -> A9│")
-                print("│    3. Đảm bảo ESP32 GND đã nối với STM32 GND.                      │")
-                print("│  • Script sẽ TỰ ĐỘNG DỪNG & BÁO SUCCESS ngay khi có tín hiệu!      │")
-                print("│  • (Bấm Ctrl+C bất kỳ lúc nào để dừng quét nếu muốn bỏ qua)        │")
+                print(f"│ {logger.BOLD_CYAN}BẮT ĐẦU KIỂM TRA ĐƯỜNG TRUYỀN UART ESP32 <---> STM32{logger.RESET}{' ' * 19}│")
+                print("│  • Đang gửi lệnh bắt tay 'PING\\n' và lắng nghe phản hồi 'PONG'...   │")
                 print("└" + "─" * 68 + "┘\n")
 
                 ser.reset_input_buffer()
@@ -326,28 +345,22 @@ def main():
                 raw_buffer = bytearray()
 
                 try:
-                    while True:
+                    while time.time() - start_probe < 10.0:
                         now = time.time()
-                        # Gửi PING đều đặn mỗi 0.35s
                         if now - last_ping_time >= 0.35:
                             ser.write(b"PING\n")
                             ser.flush()
                             last_ping_time = now
                             ping_count += 1
 
-                        # Đọc phản hồi từ cổng Serial
                         while ser.in_waiting:
                             b = ser.read(1)
-                            if b == b'\n' or b == b'\r':
+                            if b in [b'\n', b'\r']:
                                 if len(raw_buffer) > 0:
                                     line_str = raw_buffer.decode("latin1", errors="ignore").strip()
                                     raw_buffer.clear()
                                     if line_str:
-                                        # Bắt bất kỳ phản hồi hợp lệ nào từ STM32
-                                        if any(key in line_str for key in ["PONG", "[SYS]", "STATUS:", "DATA:", "MPU", "OK"]):
-                                            first_signal = line_str
-                                            break
-                                        elif len(line_str) >= 2:
+                                        if any(key in line_str for key in ["PONG", "[SYS]", "STATUS:", "DATA:", "OK"]):
                                             first_signal = line_str
                                             break
                             else:
@@ -361,29 +374,39 @@ def main():
                         spin_char = spinner[spin_idx % len(spinner)]
                         spin_idx += 1
                         elapsed_sec = int(time.time() - start_probe)
-                        sys.stdout.write(f"\r  {spin_char} Đang quét tín hiệu... Đã gửi {ping_count} gói PING ({elapsed_sec}s) | Chờ STM32 phản hồi... (Ctrl+C để dừng)  ")
+                        sys.stdout.write(f"\r  {spin_char} Đang quét tín hiệu... Đã gửi {ping_count} gói PING ({elapsed_sec}s) | Chờ STM32...  ")
                         sys.stdout.flush()
                         time.sleep(0.06)
 
                 except KeyboardInterrupt:
-                    print("\n\n[INFO] Đã tạm dừng chế độ quét liên tục bởi phím bấm.")
+                    print("\n\n[INFO] Đã dừng quét bởi người dùng.")
 
                 print()
                 if first_signal:
                     print("\n" + "╔" + "═" * 68 + "╗")
-                    print(f"║ {logger.BOLD_GREEN}🎉 ĐÃ BẮT ĐƯỢC TÍN HIỆU ĐẦU TIÊN TỪ STM32 BLACKPILL THÀNH CÔNG!{logger.RESET}{' ' * 7}║")
+                    print(f"║ {logger.BOLD_GREEN}🎉 ĐÃ THÔNG TUYẾN UART GIỮA ESP32 VÀ STM32 BLACKPILL THÀNH CÔNG!{logger.RESET}{' ' * 7}║")
                     print("╚" + "═" * 68 + "╝")
                     print(f"  ✔ Phản hồi nhận được: {logger.BOLD_CYAN}\"{first_signal}\"{logger.RESET}")
-                    print(f"  ✔ Thời gian phát hiện: sau {int(time.time() - start_probe)} giây (lần PING #{ping_count})")
-                    print("  ✔ Cầu nối UART vật lý ESP32 (4/5) <---> STM32 (A10/A9) HOẠT ĐỘNG HOÀN HẢO!")
+                    print("  ✔ Cầu nối UART vật lý ESP32 (GPIO 6/8) <---> STM32 (PA10/PA9) HOẠT ĐỘNG HOÀN HẢO!")
+
+                    # Lấy thông số STATUS kiểm chứng
+                    ser.reset_input_buffer()
+                    ser.write(b"STATUS\n")
+                    ser.flush()
+                    time.sleep(0.15)
+                    while ser.in_waiting:
+                        st_line = ser.readline().decode("latin1", errors="ignore").strip()
+                        if "STATUS:" in st_line:
+                            print(f"  ✔ Dữ liệu trạng thái STM32: {logger.BOLD_WHITE}{st_line}{logger.RESET}")
+
                     logger.success("Bước 2 ĐÃ ĐẠT (PASS)! Tiến hành sang các bước kiểm tra ngoại vi.\n")
                     test_results[STEP_2] = "PASS"
                 else:
                     logger.error(f"Chưa nhận được phản hồi từ STM32 sau {ping_count} gói PING.")
                     print("  [CHẨN ĐOÁN LỖI]:")
-                    print("  1. STM32 có đang bị kẹt ở chế độ Bootloader USB không? Bấm nút NRST trên mạch STM32.")
-                    print("  2. Kiểm tra lại chân: ESP32 Chân 4 -> STM32 A10, ESP32 Chân 5 -> STM32 A9.")
-                    print("  3. Đã nối chung dây GND giữa 2 mạch chưa?")
+                    print("  1. Bấm nhả nút NRST (Reset) trên mạch STM32 BlackPill.")
+                    print("  2. Kiểm tra lại chân: ESP32 GPIO 6 -> STM32 PA10, ESP32 GPIO 8 -> STM32 PA9.")
+                    print("  3. Đảm bảo dây GND giữa ESP32 và STM32 đã được nối chung mass.")
                     test_results[STEP_2] = "FAIL"
 
         # =====================================================================
@@ -411,10 +434,22 @@ def main():
                 ser.write(b"STATUS\n")
                 ser.flush()
                 time.sleep(0.15)
+                mpu_connected = False
                 while ser.in_waiting:
                     line = ser.readline().decode("latin1", errors="ignore").strip()
                     if "[SYS]" in line or "STATUS:" in line:
                         print(f"  [STM32 STATUS]: {line}")
+                        if "MPU=1" in line:
+                            mpu_connected = True
+
+                if not mpu_connected:
+                    print(f"\n  {logger.BOLD_YELLOW}⚠ CHÚ Ý: STM32 báo MPU=0 (Chưa nhận diện cảm biến MPU6050 trên I2C){logger.RESET}")
+                    print("  • Hướng dẫn kiểm tra kết nối MPU6050 <---> STM32:")
+                    print("    - SCL MPU6050 nối chân PB6 (STM32)")
+                    print("    - SDA MPU6050 nối chân PB7 (STM32)")
+                    print("    - VCC MPU6050 nối chân 3.3V, GND nối GND")
+                    print("    - Chân AD0 của MPU6050 nối GND (để dùng địa chỉ mặc định 0x68)")
+                    print("  • Tiếp tục kiểm tra luồng dữ liệu góc trong 5 giây tới...\n")
 
                 logger.info("Đang đọc luồng góc nghiêng thời gian thực trong 5 giây...")
                 ser.write(b"START_STREAM\n")
@@ -445,11 +480,16 @@ def main():
                 ser.flush()
 
                 pitch_range = (max(pitch_samples) - min(pitch_samples)) if pitch_samples else 0.0
-                if len(pitch_samples) >= 15:
+                gyro_max = max((abs(g) for g in gyro_samples), default=0.0)
+
+                if mpu_connected or pitch_range >= 2.0 or gyro_max >= 5.0:
                     logger.success(f"Cảm biến MPU6050 hoạt động tốt! Thu nhận {len(pitch_samples)} mẫu. Dải góc nghiêng đo được: {pitch_range:.2f}°")
                     test_results[STEP_3] = "PASS"
+                elif len(pitch_samples) >= 15:
+                    logger.warn(f"Thu nhận {len(pitch_samples)} gói dữ liệu nhưng góc nghiêng không đổi ({pitch_range:.2f}°). MPU6050 chưa kết nối I2C.")
+                    test_results[STEP_3] = "WARN"
                 else:
-                    logger.error("Không nhận được đủ dữ liệu từ MPU6050.")
+                    logger.error("Không nhận được dữ liệu cảm biến từ STM32.")
                     print("  -> Kiểm tra: Dây SDA (PB7), SCL (PB6), nguồn 3.3V và GND cấp cho MPU6050.")
                     test_results[STEP_3] = "FAIL"
 
@@ -551,6 +591,7 @@ def main():
                 test_results[STEP_5] = "BLOCKED"
             else:
                 logger.info("Đang phát xung lái Động cơ TRÁI -> Quay TIẾN (+1500)...")
+                ser.reset_input_buffer()
                 ser.write(b"TEST:MOTOR_L\n")
                 ser.flush()
                 time.sleep(0.8)
@@ -568,13 +609,31 @@ def main():
                     if line:
                         print(f"  [STM32]: {line}")
 
+                # Đọc kiểm chứng biến thiên xung Encoder Trái
+                ser.write(b"STATUS\n")
+                ser.flush()
+                time.sleep(0.1)
+                enc_l_val = None
+                while ser.in_waiting:
+                    line = ser.readline().decode("latin1", errors="ignore").strip()
+                    if "ENC_L=" in line:
+                        for part in line.split(","):
+                            if part.startswith("ENC_L="):
+                                try:
+                                    enc_l_val = int(part.split("=")[1])
+                                except ValueError:
+                                    pass
+
+                if enc_l_val is not None:
+                    print(f"  • Vị trí Encoder Trái hiện tại: {enc_l_val} xung")
+
                 ans_l = safe_input("\nBạn có nhìn thấy bánh xe TRÁI quay Tiến rồi Lùi không? [Y/n]: ", default="y").lower()
                 if ans_l in ["y", "yes", "có", "c", ""] and ans_l != "q":
                     logger.success("Động cơ và kênh công suất Trái (PWMA, AIN1, AIN2) HOẠT ĐỘNG TỐT!")
                     test_results[STEP_5] = "PASS"
                 else:
                     logger.error("Bánh xe Trái không quay!")
-                    print("  -> Kiểm tra: Pin cấp vào VM, chân STBY (PB0), PWMA (PB8), AIN1 (PA4), AIN2 (PA5).")
+                    print("  -> Kiểm tra: Pin cấp vào VM (7.4V), công tắc nguồn, chân STBY (PB0), PWMA (PB8), AIN1 (PA4), AIN2 (PA5).")
                     test_results[STEP_5] = "FAIL"
 
         # =====================================================================
@@ -599,6 +658,7 @@ def main():
                 test_results[STEP_6] = "BLOCKED"
             else:
                 logger.info("Đang phát xung lái Động cơ PHẢI -> Quay TIẾN (+1500)...")
+                ser.reset_input_buffer()
                 ser.write(b"TEST:MOTOR_R\n")
                 ser.flush()
                 time.sleep(0.8)
@@ -616,13 +676,31 @@ def main():
                     if line:
                         print(f"  [STM32]: {line}")
 
+                # Đọc kiểm chứng biến thiên xung Encoder Phải
+                ser.write(b"STATUS\n")
+                ser.flush()
+                time.sleep(0.1)
+                enc_r_val = None
+                while ser.in_waiting:
+                    line = ser.readline().decode("latin1", errors="ignore").strip()
+                    if "ENC_R=" in line:
+                        for part in line.split(","):
+                            if part.startswith("ENC_R="):
+                                try:
+                                    enc_r_val = int(part.split("=")[1])
+                                except ValueError:
+                                    pass
+
+                if enc_r_val is not None:
+                    print(f"  • Vị trí Encoder Phải hiện tại: {enc_r_val} xung")
+
                 ans_r = safe_input("\nBạn có nhìn thấy bánh xe PHẢI quay Tiến rồi Lùi không? [Y/n]: ", default="y").lower()
                 if ans_r in ["y", "yes", "có", "c", ""] and ans_r != "q":
                     logger.success("Động cơ và kênh công suất Phải (PWMB, BIN1, BIN2) HOẠT ĐỘNG TỐT!")
                     test_results[STEP_6] = "PASS"
                 else:
                     logger.error("Bánh xe Phải không quay!")
-                    print("  -> Kiểm tra: Pin cấp vào VM, chân PWMB (PB9), BIN1 (PA6), BIN2 (PA7).")
+                    print("  -> Kiểm tra: Pin cấp vào VM (7.4V), công tắc nguồn, chân PWMB (PB9), BIN1 (PA6), BIN2 (PA7).")
                     test_results[STEP_6] = "FAIL"
 
         # =====================================================================
