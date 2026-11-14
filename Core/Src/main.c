@@ -130,6 +130,7 @@ int main(void)
 #endif
 
   /* Clear I2C bus to unfreeze MPU6050 in case of previous warm reset */
+  HAL_I2C_DeInit(&hi2c1);
   MPU6050_I2C_BusClear();
   MX_I2C1_Init();
 
@@ -193,21 +194,24 @@ int main(void)
                            (uint8_t)RobotFSM_GetState());
       }
 
-      // 7. Visual LED Heartbeat
+      // 7. Visual LED Heartbeat (Skip if user activated manual LED control via BLE)
       static uint32_t s_heartbeat_cnt = 0;
       s_heartbeat_cnt++;
-      if (MPU6050_IsConnected())
+      if (!g_led_manual_mode)
       {
-        if (s_heartbeat_cnt % 50 == 0) // 1Hz normal heartbeat
+        if (MPU6050_IsConnected())
         {
-          Board_LED_Toggle();
+          if (s_heartbeat_cnt % 50 == 0) // 1Hz normal heartbeat
+          {
+            Board_LED_Toggle();
+          }
         }
-      }
-      else
-      {
-        if (s_heartbeat_cnt % 10 == 0) // 5Hz fast error blink
+        else
         {
-          Board_LED_Toggle();
+          if (s_heartbeat_cnt % 10 == 0) // 5Hz fast error blink
+          {
+            Board_LED_Toggle();
+          }
         }
       }
     }

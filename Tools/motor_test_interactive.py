@@ -6,6 +6,25 @@ Target: TB6612 Dual H-Bridge + GA25 DC Motors via ESP32-S3 UART Bridge.
 
 import os
 import sys
+
+# Auto-activate workspace venv if pyserial is not in current python environment
+def _bootstrap_venv():
+    try:
+        import serial
+        return
+    except ImportError:
+        pass
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    venv_py = os.path.join(repo_root, "venv", "bin", "python3")
+    if os.path.isfile(venv_py) and os.path.abspath(sys.executable) != os.path.abspath(venv_py):
+        os.execv(venv_py, [venv_py] + sys.argv)
+    import glob
+    for sp in glob.glob(os.path.join(repo_root, "venv", "lib", "python*", "site-packages")):
+        if os.path.isdir(sp) and sp not in sys.path:
+            sys.path.insert(0, sp)
+
+_bootstrap_venv()
+
 import time
 import serial
 import serial.tools.list_ports
@@ -80,7 +99,7 @@ def main():
                         print(f"  >>> [STM32]: {line}")
             time.sleep(0.05)
         if not got_reply:
-            logger.warn("Không nhận được phản hồi từ STM32. Kiểm tra dây UART nối từ ESP32 (4, 5) sang STM32 (A10, A9)!")
+            logger.warn("Không nhận được phản hồi từ STM32. Kiểm tra dây UART: ESP32 GPIO 6 (TX) -> STM32 PA3 (RX), STM32 PA2 (TX) -> ESP32 GPIO 3 (RX)!")
 
     try:
         while True:

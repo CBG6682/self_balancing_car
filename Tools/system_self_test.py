@@ -16,6 +16,25 @@ Components Tested:
 
 import os
 import sys
+
+# Auto-activate workspace venv if pyserial is not in current python environment
+def _bootstrap_venv():
+    try:
+        import serial
+        return
+    except ImportError:
+        pass
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    venv_py = os.path.join(repo_root, "venv", "bin", "python3")
+    if os.path.isfile(venv_py) and os.path.abspath(sys.executable) != os.path.abspath(venv_py):
+        os.execv(venv_py, [venv_py] + sys.argv)
+    import glob
+    for sp in glob.glob(os.path.join(repo_root, "venv", "lib", "python*", "site-packages")):
+        if os.path.isdir(sp) and sp not in sys.path:
+            sys.path.insert(0, sp)
+
+_bootstrap_venv()
+
 import time
 import serial
 import serial.tools.list_ports
@@ -28,13 +47,14 @@ BAUD = 115200
 
 STEP_1 = "1. Cổng USB / ESP32-S3 Bridge"
 STEP_2 = "2. Đường truyền UART (ESP32 <-> STM32)"
-STEP_3 = "3. Cảm biến MPU6050 (I2C PB6/PB7)"
-STEP_4 = "4. Đĩa Encoder GA25 (TIM2 & TIM3)"
-STEP_5 = "5. Động cơ & Cầu H (Bánh Trái)"
-STEP_6 = "6. Động cơ & Cầu H (Bánh Phải)"
-STEP_7 = "7. Đồng bộ 2 động cơ & Phanh khẩn cấp"
+STEP_3 = "3. Kết nối & Lệnh Bluetooth BLE (App Smartphone & LED)"
+STEP_4 = "4. Cảm biến MPU6050 (I2C PB6/PB7)"
+STEP_5 = "5. Đĩa Encoder GA25 (TIM2 & TIM3)"
+STEP_6 = "6. Động cơ & Cầu H (Bánh Trái)"
+STEP_7 = "7. Động cơ & Cầu H (Bánh Phải)"
+STEP_8 = "8. Đồng bộ 2 động cơ & Phanh khẩn cấp"
 
-ALL_STEPS = [STEP_1, STEP_2, STEP_3, STEP_4, STEP_5, STEP_6, STEP_7]
+ALL_STEPS = [STEP_1, STEP_2, STEP_3, STEP_4, STEP_5, STEP_6, STEP_7, STEP_8]
 
 
 def safe_input(prompt_text, default=""):
@@ -254,7 +274,7 @@ def main():
         # BƯỚC 1: CỔNG KẾT NỐI SERIAL & CẦU NỐI ESP32-S3
         # =====================================================================
         ans = prompt_user(
-            step_num="1/7",
+            step_num="1/8",
             title="Cổng Kết Nối USB & Mạch Nạp / Cầu Nối ESP32-S3",
             instructions=[
                 f"Cắm cáp USB nối mạch ESP32-S3 (hoặc USB-UART) vào máy tính.",
@@ -311,12 +331,12 @@ def main():
         # BƯỚC 2: ĐƯỜNG TRUYỀN UART VẬT LÝ ESP32 <-> STM32
         # =====================================================================
         ans = prompt_user(
-            step_num="2/7",
+            step_num="2/8",
             title="Đường Truyền UART Vật Lý Giữa ESP32-S3 Và STM32 BlackPill",
             instructions=[
                 "Đảm bảo đã nối 3 dây giữa ESP32 và STM32 (chân đã được xác thực):",
                 "  • ESP32 GPIO 6 (TX) ---> STM32 Chân PA10 (USART1 RX)",
-                "  • ESP32 GPIO 8 (RX) <--- STM32 Chân PA9  (USART1 TX)",
+                "  • ESP32 GPIO 3 (RX) <--- STM32 Chân PA9  (USART1 TX)",
                 "  • ESP32 GND        <---> STM32 GND      (Bắt buộc chung Mass)",
                 "Chương trình sẽ gửi lệnh PING và truy vấn STATUS từ STM32 qua ESP32-S3 Bridge."
             ]
@@ -387,7 +407,7 @@ def main():
                     print(f"║ {logger.BOLD_GREEN}🎉 ĐÃ THÔNG TUYẾN UART GIỮA ESP32 VÀ STM32 BLACKPILL THÀNH CÔNG!{logger.RESET}{' ' * 7}║")
                     print("╚" + "═" * 68 + "╝")
                     print(f"  ✔ Phản hồi nhận được: {logger.BOLD_CYAN}\"{first_signal}\"{logger.RESET}")
-                    print("  ✔ Cầu nối UART vật lý ESP32 (GPIO 6/8) <---> STM32 (PA10/PA9) HOẠT ĐỘNG HOÀN HẢO!")
+                    print("  ✔ Cầu nối UART vật lý ESP32 (GPIO 6/3) <---> STM32 (PA10/PA9) HOẠT ĐỘNG HOÀN HẢO!")
 
                     # Lấy thông số STATUS kiểm chứng
                     ser.reset_input_buffer()
@@ -405,15 +425,186 @@ def main():
                     logger.error(f"Chưa nhận được phản hồi từ STM32 sau {ping_count} gói PING.")
                     print("  [CHẨN ĐOÁN LỖI]:")
                     print("  1. Bấm nhả nút NRST (Reset) trên mạch STM32 BlackPill.")
-                    print("  2. Kiểm tra lại chân: ESP32 GPIO 6 -> STM32 PA10, ESP32 GPIO 8 -> STM32 PA9.")
+                    print("  2. Kiểm tra lại chân: ESP32 GPIO 6 -> STM32 PA10, ESP32 GPIO 3 -> STM32 PA9.")
                     print("  3. Đảm bảo dây GND giữa ESP32 và STM32 đã được nối chung mass.")
                     test_results[STEP_2] = "FAIL"
 
         # =====================================================================
-        # BƯỚC 3: CẢM BIẾN GÓC NGHIÊNG MPU6050 & I2C BUS
+        # BƯỚC 3: KẾT NỐI VÀ ĐIỀU KHIỂN BLUETOOTH BLE (SMARTPHONE APP & LED)
         # =====================================================================
         ans = prompt_user(
-            step_num="3/7",
+            step_num="3/8",
+            title="Kết Nối & Điều Khiển Không Dây Bluetooth BLE (Smartphone App & Đèn LED)",
+            instructions=[
+                "Bật Bluetooth trên điện thoại, mở app (Serial Bluetooth Terminal hoặc BLE Controller).",
+                "Quét và kết nối với thiết bị: 'STM32_Balance_Car' (Nordic UART Service).",
+                "Gửi lần lượt ĐỦ 7 LỆNH ĐIỀU KHIỂN từ điện thoại (Không giới hạn thời gian):",
+                "  1. Bật đèn LED PC13 : Gửi '1' hoặc 'LED:ON'",
+                "  2. Tắt đèn LED PC13 : Gửi '0' hoặc 'LED:OFF'",
+                "  3. Lệnh TIẾN        : Gửi 'F' hoặc 'FORWARD'",
+                "  4. Lệnh LÙI         : Gửi 'B' hoặc 'BACKWARD'",
+                "  5. Lệnh RẼ TRÁI     : Gửi 'L' hoặc 'LEFT'",
+                "  6. Lệnh RẼ PHẢI     : Gửi 'R' hoặc 'RIGHT'",
+                "  7. Lệnh DỪNG        : Gửi 'S' hoặc 'STOP'",
+                "Khi bạn gửi đủ cả 7 lệnh trên, chương trình sẽ tự động hoàn tất và sang bước tiếp theo."
+            ]
+        )
+        if ans == "cancel":
+            return
+        elif ans == "skip":
+            test_results[STEP_3] = "SKIPPED"
+        else:
+            if not ensure_serial_connection():
+                logger.warn("Chưa có kết nối Serial tới ESP32-S3 -> Không thể kiểm tra BLE.")
+                test_results[STEP_3] = "BLOCKED"
+            else:
+                required_cmds = {
+                    "LED_ON":   {"label": "1. Bật đèn LED       (1 / LED:ON)",   "done": False},
+                    "LED_OFF":  {"label": "2. Tắt đèn LED       (0 / LED:OFF)",  "done": False},
+                    "FORWARD":  {"label": "3. Lệnh TIẾN         (F / FORWARD)",  "done": False},
+                    "BACKWARD": {"label": "4. Lệnh LÙI          (B / BACKWARD)", "done": False},
+                    "LEFT":     {"label": "5. Lệnh RẼ TRÁI      (L / LEFT)",     "done": False},
+                    "RIGHT":    {"label": "6. Lệnh RẼ PHẢI     (R / RIGHT)",    "done": False},
+                    "STOP":     {"label": "7. Lệnh DỪNG         (S / STOP)",     "done": False},
+                }
+
+                def print_ble_checklist():
+                    done_cnt = sum(1 for v in required_cmds.values() if v["done"])
+                    total_cnt = len(required_cmds)
+                    print("\n" + "┌" + "─" * 68 + "┐")
+                    header = f"DANH SÁCH 7 LỆNH CẦN THU NHẬN TỪ ĐIỆN THOẠI ({done_cnt}/{total_cnt} ĐÃ ĐẠT):"
+                    print(f"│ {logger.BOLD_CYAN}{header:<66}{logger.RESET} │")
+                    print("├" + "─" * 68 + "┤")
+                    for k, v in required_cmds.items():
+                        if v["done"]:
+                            tag = f"{logger.BOLD_GREEN}[✔ PASS]{logger.RESET}"
+                        else:
+                            tag = f"{logger.DIM}[  CHỜ ]{logger.RESET}"
+                        print(f"│  {tag}  {v['label']:<54} │")
+                    print("└" + "─" * 68 + "┘\n")
+
+                print("\n" + "┌" + "─" * 68 + "┐")
+                print(f"│ {logger.BOLD_CYAN}ĐANG LẮNG NGHE TÍN HIỆU BLUETOOTH BLE (KHÔNG GIỚI HẠN THỜI GIAN)...{logger.RESET}   │")
+                print("│  • Tên thiết bị BLE: STM32_Balance_Car                             │")
+                print("│  • Service UUID    : 6E400001-B5A3-F393-E0A9-E50E24DCCA9E          │")
+                print("│  • Gửi lệnh (RX)   : 6E400002-B5A3-F393-E0A9-E50E24DCCA9E          │")
+                print("│  • Nhận phản hồi(TX): 6E400003-B5A3-F393-E0A9-E50E24DCCA9E         │")
+                print("│  • Gợi ý: Hãy bấm lần lượt các nút trên app. Nhấn Ctrl+C để dừng sớm. │")
+                print("└" + "─" * 68 + "┘\n")
+
+                print_ble_checklist()
+
+                ser.reset_input_buffer()
+                ble_connected_detected = False
+                raw_buf = bytearray()
+                start_listen_time = time.time()
+
+                try:
+                    while True:
+                        while ser.in_waiting:
+                            b = ser.read(1)
+                            if b in [b'\n', b'\r']:
+                                if len(raw_buf) > 0:
+                                    line_str = raw_buf.decode("latin1", errors="ignore").strip()
+                                    raw_buf.clear()
+                                    if line_str:
+                                        # Detect connection event
+                                        if "Client connected" in line_str or "BLE:CONNECTED" in line_str or "OK_BLE:CONNECTED" in line_str:
+                                            if not ble_connected_detected:
+                                                ble_connected_detected = True
+                                                print(f"  {logger.BOLD_GREEN}🎉 PHÁT HIỆN ĐIỆN THOẠI ĐÃ KẾT NỐI VÀO BLE THÀNH CÔNG!{logger.RESET}")
+
+                                        # Detect commands from phone or STM32 ACKs
+                                        cmd_matched = None
+
+                                        if "[BLE->STM32]" in line_str:
+                                            cmd_val = line_str.replace("[BLE->STM32]", "").strip()
+                                            print(f"  {logger.BOLD_CYAN}📱 [ĐIỆN THOẠI GỬI]:{logger.RESET} {logger.BOLD_WHITE}{cmd_val}{logger.RESET}")
+                                            c_up = cmd_val.upper()
+                                            if c_up in ["1", "LED:ON", "LED_ON", "CMD:LED_ON", "ON"]:
+                                                cmd_matched = "LED_ON"
+                                            elif c_up in ["0", "LED:OFF", "LED_OFF", "CMD:LED_OFF", "OFF"]:
+                                                cmd_matched = "LED_OFF"
+                                            elif c_up in ["F", "FORWARD", "CMD:FORWARD"]:
+                                                cmd_matched = "FORWARD"
+                                            elif c_up in ["B", "BACKWARD", "CMD:BACKWARD"]:
+                                                cmd_matched = "BACKWARD"
+                                            elif c_up in ["L", "LEFT", "CMD:LEFT"]:
+                                                cmd_matched = "LEFT"
+                                            elif c_up in ["R", "RIGHT", "CMD:RIGHT"]:
+                                                cmd_matched = "RIGHT"
+                                            elif c_up in ["S", "STOP", "CMD:STOP"]:
+                                                cmd_matched = "STOP"
+
+                                        if line_str.startswith("OK_LED:ON"):
+                                            print(f"  {logger.BOLD_GREEN}💡 [STM32 LED]:{logger.RESET} {line_str} (Đèn LED PC13 đã BẬT)")
+                                            cmd_matched = "LED_ON"
+                                        elif line_str.startswith("OK_LED:OFF"):
+                                            print(f"  {logger.BOLD_GREEN}💡 [STM32 LED]:{logger.RESET} {line_str} (Đèn LED PC13 đã TẮT)")
+                                            cmd_matched = "LED_OFF"
+                                        elif line_str.startswith("OK_CMD:FORWARD"):
+                                            print(f"  {logger.BOLD_GREEN}🚀 [STM32 LỆNH]:{logger.RESET} {line_str} (Lệnh TIẾN)")
+                                            cmd_matched = "FORWARD"
+                                        elif line_str.startswith("OK_CMD:BACKWARD"):
+                                            print(f"  {logger.BOLD_GREEN}🚀 [STM32 LỆNH]:{logger.RESET} {line_str} (Lệnh LÙI)")
+                                            cmd_matched = "BACKWARD"
+                                        elif line_str.startswith("OK_CMD:LEFT"):
+                                            print(f"  {logger.BOLD_GREEN}🚀 [STM32 LỆNH]:{logger.RESET} {line_str} (Lệnh TRÁI)")
+                                            cmd_matched = "LEFT"
+                                        elif line_str.startswith("OK_CMD:RIGHT"):
+                                            print(f"  {logger.BOLD_GREEN}🚀 [STM32 LỆNH]:{logger.RESET} {line_str} (Lệnh PHẢI)")
+                                            cmd_matched = "RIGHT"
+                                        elif line_str.startswith("OK_CMD:STOP"):
+                                            print(f"  {logger.BOLD_GREEN}🛑 [STM32 LỆNH]:{logger.RESET} {line_str} (Lệnh DỪNG)")
+                                            cmd_matched = "STOP"
+
+                                        if cmd_matched and not required_cmds[cmd_matched]["done"]:
+                                            required_cmds[cmd_matched]["done"] = True
+                                            print(f"\n  {logger.BOLD_GREEN}✔ ĐÃ XÁC NHẬN LỆNH:{logger.RESET} {required_cmds[cmd_matched]['label']}")
+                                            print_ble_checklist()
+                            else:
+                                raw_buf.extend(b)
+                                if len(raw_buf) > 256:
+                                    raw_buf.clear()
+
+                        all_done = all(v["done"] for v in required_cmds.values())
+                        if all_done:
+                            break
+
+                        done_cnt = sum(1 for v in required_cmds.values() if v["done"])
+                        elapsed_s = int(time.time() - start_listen_time)
+                        status_tag = f"{logger.BOLD_GREEN}Đã kết nối{logger.RESET}" if ble_connected_detected else f"{logger.YELLOW}Đang chờ kết nối...{logger.RESET}"
+                        sys.stdout.write(f"\r  📡 BLE: {status_tag} | Tiến độ: {done_cnt}/7 lệnh | Thời gian: {elapsed_s}s (Ctrl+C để dừng)  ")
+                        sys.stdout.flush()
+                        time.sleep(0.04)
+
+                except KeyboardInterrupt:
+                    print("\n[INFO] Đã tạm dừng lắng nghe BLE theo yêu cầu người dùng.")
+
+                done_cnt = sum(1 for v in required_cmds.values() if v["done"])
+                print()
+                if done_cnt == len(required_cmds):
+                    print("╔" + "═" * 68 + "╗")
+                    print(f"║ {logger.BOLD_GREEN}🎉 CHÚC MỪNG: ĐÃ THU NHẬN ĐẦY ĐỦ 7/7 LỆNH BLUETOOTH THÀNH CÔNG!{logger.RESET}{' ' * 7}║")
+                    print("╚" + "═" * 68 + "╝")
+                    logger.success("Mạch Bluetooth BLE 5.0 và STM32 đáp ứng toàn bộ tập lệnh điều khiển hoàn hảo!")
+                    test_results[STEP_3] = "PASS"
+                elif done_cnt >= 3:
+                    logger.warn(f"Đã nhận {done_cnt}/7 lệnh Bluetooth.")
+                    ask_user = safe_input("Bạn có muốn đánh giá ĐẠT (PASS) cho bước Bluetooth không? [Y/n]: ", default="y").lower()
+                    if ask_user in ["y", "yes", "c", "có"]:
+                        test_results[STEP_3] = "PASS"
+                    else:
+                        test_results[STEP_3] = "WARN"
+                else:
+                    logger.error(f"Chưa nhận đủ lệnh Bluetooth (mới đạt {done_cnt}/7 lệnh).")
+                    test_results[STEP_3] = "FAIL"
+
+        # =====================================================================
+        # BƯỚC 4: CẢM BIẾN GÓC NGHIÊNG MPU6050 & I2C BUS
+        # =====================================================================
+        ans = prompt_user(
+            step_num="4/8",
             title="Cảm Biến Góc Nghiêng MPU6050 & Giao Tiếp I2C (PB6/PB7)",
             instructions=[
                 "Kiểm tra chip MPU6050 (I2C Address 0x68, WHO_AM_I).",
@@ -484,20 +675,20 @@ def main():
 
                 if mpu_connected or pitch_range >= 2.0 or gyro_max >= 5.0:
                     logger.success(f"Cảm biến MPU6050 hoạt động tốt! Thu nhận {len(pitch_samples)} mẫu. Dải góc nghiêng đo được: {pitch_range:.2f}°")
-                    test_results[STEP_3] = "PASS"
+                    test_results[STEP_4] = "PASS"
                 elif len(pitch_samples) >= 15:
                     logger.warn(f"Thu nhận {len(pitch_samples)} gói dữ liệu nhưng góc nghiêng không đổi ({pitch_range:.2f}°). MPU6050 chưa kết nối I2C.")
-                    test_results[STEP_3] = "WARN"
+                    test_results[STEP_4] = "WARN"
                 else:
                     logger.error("Không nhận được dữ liệu cảm biến từ STM32.")
                     print("  -> Kiểm tra: Dây SDA (PB7), SCL (PB6), nguồn 3.3V và GND cấp cho MPU6050.")
-                    test_results[STEP_3] = "FAIL"
+                    test_results[STEP_4] = "FAIL"
 
         # =====================================================================
-        # BƯỚC 4: ĐĨA ĐẾM XUNG ENCODER GA25 (TRÁI & PHẢI)
+        # BƯỚC 5: ĐĨA ĐẾM XUNG ENCODER GA25 (TRÁI & PHẢI)
         # =====================================================================
         ans = prompt_user(
-            step_num="4/7",
+            step_num="5/8",
             title="Đĩa Đọc Xung Encoder GA25 (TIM2 PA0/PA1 & TIM3 PB4/PB5)",
             instructions=[
                 "Trong 6 giây tới, hãy LẤY TAY XOAY LẦN LƯỢT 2 BÁNH XE:",
@@ -509,11 +700,11 @@ def main():
         if ans == "cancel":
             return
         elif ans == "skip":
-            test_results[STEP_4] = "SKIPPED"
+            test_results[STEP_5] = "SKIPPED"
         else:
             if not ensure_serial_connection():
                 logger.warn("Chưa có kết nối Serial -> Không thể đọc dữ liệu Encoder.")
-                test_results[STEP_4] = "BLOCKED"
+                test_results[STEP_5] = "BLOCKED"
             else:
                 ser.reset_input_buffer()
                 ser.write(b"START_STREAM\n")
@@ -559,20 +750,20 @@ def main():
 
                 if diff_l >= 15 and diff_r >= 15:
                     logger.success("Cả 2 đĩa Encoder GA25 (Trái và Phải) đếm xung hoàn hảo!")
-                    test_results[STEP_4] = "PASS"
+                    test_results[STEP_5] = "PASS"
                 elif diff_l >= 15 or diff_r >= 15:
                     logger.warn("Một trong hai bên Encoder chưa đếm được xung (hoặc chưa xoay đủ lực).")
-                    test_results[STEP_4] = "WARN"
+                    test_results[STEP_5] = "WARN"
                 else:
                     logger.error("Không ghi nhận được xung encoder nào thay đổi.")
                     print("  -> Kiểm tra: Nguồn 3.3V/GND cho encoder, PA0/PA1 (Trái), PB4/PB5 (Phải).")
-                    test_results[STEP_4] = "FAIL"
+                    test_results[STEP_5] = "FAIL"
 
         # =====================================================================
-        # BƯỚC 5: ĐỘNG CƠ GA25 & MẠCH CẦU H TB6612 (BÁNH TRÁI)
+        # BƯỚC 6: ĐỘNG CƠ GA25 & MẠCH CẦU H TB6612 (BÁNH TRÁI)
         # =====================================================================
         ans = prompt_user(
-            step_num="5/7",
+            step_num="6/8",
             title="Động Cơ GA25 & Cầu H TB6612 - BÁNH TRÁI (PWMA PB8, AIN1 PA4, AIN2 PA5)",
             instructions=[
                 "Kê xe hổng khỏi mặt bàn để bánh xe quay tự do trong không khí.",
@@ -584,11 +775,11 @@ def main():
         if ans == "cancel":
             return
         elif ans == "skip":
-            test_results[STEP_5] = "SKIPPED"
+            test_results[STEP_6] = "SKIPPED"
         else:
             if not ensure_serial_connection():
                 logger.warn("Chưa có kết nối Serial -> Không thể phát xung lái Động cơ Trái.")
-                test_results[STEP_5] = "BLOCKED"
+                test_results[STEP_6] = "BLOCKED"
             else:
                 logger.info("Đang phát xung lái Động cơ TRÁI -> Quay TIẾN (+1500)...")
                 ser.reset_input_buffer()
@@ -630,17 +821,17 @@ def main():
                 ans_l = safe_input("\nBạn có nhìn thấy bánh xe TRÁI quay Tiến rồi Lùi không? [Y/n]: ", default="y").lower()
                 if ans_l in ["y", "yes", "có", "c", ""] and ans_l != "q":
                     logger.success("Động cơ và kênh công suất Trái (PWMA, AIN1, AIN2) HOẠT ĐỘNG TỐT!")
-                    test_results[STEP_5] = "PASS"
+                    test_results[STEP_6] = "PASS"
                 else:
                     logger.error("Bánh xe Trái không quay!")
                     print("  -> Kiểm tra: Pin cấp vào VM (7.4V), công tắc nguồn, chân STBY (PB0), PWMA (PB8), AIN1 (PA4), AIN2 (PA5).")
-                    test_results[STEP_5] = "FAIL"
+                    test_results[STEP_6] = "FAIL"
 
         # =====================================================================
-        # BƯỚC 6: ĐỘNG CƠ GA25 & MẠCH CẦU H TB6612 (BÁNH PHẢI)
+        # BƯỚC 7: ĐỘNG CƠ GA25 & MẠCH CẦU H TB6612 (BÁNH PHẢI)
         # =====================================================================
         ans = prompt_user(
-            step_num="6/7",
+            step_num="7/8",
             title="Động Cơ GA25 & Cầu H TB6612 - BÁNH PHẢI (PWMB PB9, BIN1 PA6, BIN2 PA7)",
             instructions=[
                 "Vẫn giữ xe trên giá đỡ, bánh xe quay tự do.",
@@ -651,11 +842,11 @@ def main():
         if ans == "cancel":
             return
         elif ans == "skip":
-            test_results[STEP_6] = "SKIPPED"
+            test_results[STEP_7] = "SKIPPED"
         else:
             if not ensure_serial_connection():
                 logger.warn("Chưa có kết nối Serial -> Không thể phát xung lái Động cơ Phải.")
-                test_results[STEP_6] = "BLOCKED"
+                test_results[STEP_7] = "BLOCKED"
             else:
                 logger.info("Đang phát xung lái Động cơ PHẢI -> Quay TIẾN (+1500)...")
                 ser.reset_input_buffer()
@@ -697,17 +888,17 @@ def main():
                 ans_r = safe_input("\nBạn có nhìn thấy bánh xe PHẢI quay Tiến rồi Lùi không? [Y/n]: ", default="y").lower()
                 if ans_r in ["y", "yes", "có", "c", ""] and ans_r != "q":
                     logger.success("Động cơ và kênh công suất Phải (PWMB, BIN1, BIN2) HOẠT ĐỘNG TỐT!")
-                    test_results[STEP_6] = "PASS"
+                    test_results[STEP_7] = "PASS"
                 else:
                     logger.error("Bánh xe Phải không quay!")
                     print("  -> Kiểm tra: Pin cấp vào VM (7.4V), công tắc nguồn, chân PWMB (PB9), BIN1 (PA6), BIN2 (PA7).")
-                    test_results[STEP_6] = "FAIL"
+                    test_results[STEP_7] = "FAIL"
 
         # =====================================================================
-        # BƯỚC 7: ĐỒNG BỘ 2 ĐỘNG CƠ & CHỐT PHANH KHẨN CẤP
+        # BƯỚC 8: ĐỒNG BỘ 2 ĐỘNG CƠ & CHỐT PHANH KHẨN CẤP
         # =====================================================================
         ans = prompt_user(
-            step_num="7/7",
+            step_num="8/8",
             title="Đồng Bộ Hai Động Cơ & Cơ Chế Phanh An Toàn (Emergency Stop)",
             instructions=[
                 "Cả hai bánh xe sẽ cùng quay TIẾN trong 0.8 giây.",
@@ -717,11 +908,11 @@ def main():
         if ans == "cancel":
             return
         elif ans == "skip":
-            test_results[STEP_7] = "SKIPPED"
+            test_results[STEP_8] = "SKIPPED"
         else:
             if not ensure_serial_connection():
                 logger.warn("Chưa có kết nối Serial -> Không thể kiểm tra đồng bộ động cơ.")
-                test_results[STEP_7] = "BLOCKED"
+                test_results[STEP_8] = "BLOCKED"
             else:
                 logger.info("Kích hoạt cả 2 động cơ quay đồng bộ...")
                 ser.write(b"TEST:MOTORS\n")
@@ -730,7 +921,7 @@ def main():
 
                 emergency_stop()
                 logger.success("Lệnh phanh khẩn cấp (Emergency Stop) đã kích hoạt thành công!")
-                test_results[STEP_7] = "PASS"
+                test_results[STEP_8] = "PASS"
 
     except KeyboardInterrupt:
         print("\n\n[WARN] Người dùng ngắt ngang bằng phím Ctrl+C.")
@@ -772,8 +963,8 @@ def main():
 
         print("╚" + "═" * 68 + "╝")
 
-        if pass_count == 7:
-            print(f"\n{logger.BOLD_GREEN}🎉 CHÚC MỪNG: TOÀN BỘ 7/7 LINH KIỆN VÀ ĐƯỜNG TRUYỀN ĐỀU HOẠT ĐỘNG HOÀN HẢO!{logger.RESET}")
+        if pass_count == total_steps:
+            print(f"\n{logger.BOLD_GREEN}🎉 CHÚC MỪNG: TOÀN BỘ {total_steps}/{total_steps} LINH KIỆN VÀ ĐƯỜNG TRUYỀN ĐỀU HOẠT ĐỘNG HOÀN HẢO!{logger.RESET}")
             print("  -> Chiếc xe đã sẵn sàng 100% để đặt xuống mặt sàn tự cân bằng.")
             print("  -> Khởi động xe: ./run_pipeline.sh --hardware")
         elif pass_count > 0:

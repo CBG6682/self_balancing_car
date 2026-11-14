@@ -41,7 +41,7 @@ def main():
     print("=" * 65)
     print(" KẾT NỐI PHẦN CỨNG ĐÃ XÁC THỰC:")
     print("  • ESP32 GPIO 6 (TX) ---> STM32 Chân PA10 (RX)")
-    print("  • ESP32 GPIO 8 (RX) <--- STM32 Chân PA9  (TX)")
+    print("  • ESP32 GPIO 3 (RX) <--- STM32 Chân PA9  (TX)")
     print("  • ESP32 GND        <---> STM32 GND")
     print("  • Mẹo: Bấm nhả nút NRST (Reset) trên STM32 để xem dòng boot")
     print("  • (Bấm Ctrl+C để dừng lại)\n")

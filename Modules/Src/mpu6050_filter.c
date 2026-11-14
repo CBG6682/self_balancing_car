@@ -7,8 +7,10 @@
  */
 
 #include "mpu6050_filter.h"
+#include "telemetry_uart.h"
 #include <math.h>
 #include <string.h>
+#include <stdio.h>
 
 /* Private module state */
 static I2C_HandleTypeDef *s_hi2c = NULL;
@@ -54,6 +56,20 @@ void MPU6050_I2C_BusClear(void)
     for (volatile int d = 0; d < 200; d++);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
     HAL_Delay(1);
+
+    // Restore PB6 and PB7 to Alternate Function 4 (I2C1) with internal Pull-up
+    GPIO_InitStruct.Pin = GPIO_PIN_6 | GPIO_PIN_7;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    // Hard reset I2C1 peripheral block to clear BUSY and error flags
+    __HAL_RCC_I2C1_FORCE_RESET();
+    HAL_Delay(2);
+    __HAL_RCC_I2C1_RELEASE_RESET();
+    HAL_Delay(2);
 }
 
 /* -----------------------------------------------------------------------------
@@ -141,17 +157,35 @@ HAL_StatusTypeDef MPU6050_Init(I2C_HandleTypeDef *hi2c)
     Kalman_Init(&s_sensor_data.kalman);
     s_sensor_data.accel_pitch_offset = MECHANICAL_BALANCE_OFFSET_DEG;
 
-    // 1. Probe I2C address: Try 0xD0 (AD0=GND), then 0xD2 (AD0=3.3V)
-    uint8_t who_am_i = 0;
-    s_mpu_i2c_addr = MPU6050_I2C_ADDR; // 0xD0
-    if (MPU6050_ReadRegisters(MPU6050_REG_WHO_AM_I, &who_am_i, 1, 50) != HAL_OK || who_am_i != MPU6050_WHO_AM_I_VALUE) {
-        // Try alternate address 0xD2
-        s_mpu_i2c_addr = (0x69 << 1);
-        who_am_i = 0;
-        if (MPU6050_ReadRegisters(MPU6050_REG_WHO_AM_I, &who_am_i, 1, 50) != HAL_OK || who_am_i != MPU6050_WHO_AM_I_VALUE) {
-            s_is_connected = 0;
-            return HAL_ERROR;
+    // 1. Scan I2C bus to find responding device
+    char dbg[96];
+    uint8_t found_addr = 0;
+    for (uint8_t a = 1; a < 128; a++) {
+        if (HAL_I2C_IsDeviceReady(s_hi2c, (uint16_t)(a << 1), 2, 5) == HAL_OK) {
+            snprintf(dbg, sizeof(dbg), "[I2C_SCAN] Device found at 0x%02X!\n", a);
+            Telemetry_SendString(dbg);
+            if (found_addr == 0) found_addr = a;
         }
+    }
+
+    if (found_addr != 0) {
+        s_mpu_i2c_addr = (found_addr << 1);
+    } else {
+        s_mpu_i2c_addr = MPU6050_I2C_ADDR; // Default fallback
+        snprintf(dbg, sizeof(dbg), "[I2C_SCAN] No device ACKed (hi2c error=0x%lX)\n", s_hi2c->ErrorCode);
+        Telemetry_SendString(dbg);
+    }
+
+    uint8_t who_am_i = 0;
+    HAL_StatusTypeDef r_who = MPU6050_ReadRegisters(MPU6050_REG_WHO_AM_I, &who_am_i, 1, 50);
+    snprintf(dbg, sizeof(dbg), "[I2C_DEBUG] Probe 0x%02X: res=%d, WHO_AM_I=0x%02X (expected 0x68)\n",
+             s_mpu_i2c_addr >> 1, (int)r_who, (int)who_am_i);
+    Telemetry_SendString(dbg);
+
+    // Accept 0x68 (MPU6050), 0x70/0x71/0x72 (MPU6500/9250), 0x98 (clones), or any non-zero if ACKed
+    if (r_who != HAL_OK && found_addr == 0) {
+        s_is_connected = 0;
+        return HAL_ERROR;
     }
 
     // 2. Reset Device and Wake Up (Clear SLEEP bit, select PLL with X-axis Gyro clock)

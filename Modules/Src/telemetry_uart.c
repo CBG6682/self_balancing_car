@@ -10,9 +10,14 @@
 #include "mpu6050_filter.h"
 #include "motor_encoder.h"
 #include "motor_test.h"
+#include "gpio.h"
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
+
+/* Global state for LED manual override */
+volatile uint8_t g_led_manual_mode = 0;
 
 /* Private module state */
 static UART_HandleTypeDef *s_huart = NULL;
@@ -25,6 +30,7 @@ static void (*s_rx_hook)(uint8_t) = NULL;
 static uint8_t s_rx_ringbuf[TELEMETRY_RX_BUF_SIZE];
 static volatile uint16_t s_rx_head = 0;
 static volatile uint16_t s_rx_tail = 0;
+static volatile uint32_t s_last_rx_tick = 0;
 
 /* Line accumulation buffer for ASCII command parsing */
 static char s_line_buf[TELEMETRY_CMD_LINE_SIZE];
@@ -250,29 +256,76 @@ static void ProcessCommandLine(char *cmd_line)
         return;
     }
 
-    // 6. Motion Control Commands (Full string and single-letter short forms)
-    if (strcmp(cmd_line, "CMD:FORWARD") == 0 || strcmp(cmd_line, "FORWARD") == 0 || strcmp(cmd_line, "F") == 0) {
+    // 6. Onboard / Module LED Control Commands (Visual Verification without motors)
+    if (strcasecmp(cmd_line, "CMD:LED_ON") == 0 ||
+        strcasecmp(cmd_line, "LED:ON") == 0 ||
+        strcasecmp(cmd_line, "LED_ON") == 0 ||
+        strcmp(cmd_line, "1") == 0 ||
+        strcasecmp(cmd_line, "ON") == 0) {
+        g_led_manual_mode = 1;
+        Board_LED_Set(1); // 1 = LED ON (PC13 LOW)
+        Telemetry_SendString("OK_LED:ON\n");
+        return;
+    }
+    if (strcasecmp(cmd_line, "CMD:LED_OFF") == 0 ||
+        strcasecmp(cmd_line, "LED:OFF") == 0 ||
+        strcasecmp(cmd_line, "LED_OFF") == 0 ||
+        strcmp(cmd_line, "0") == 0 ||
+        strcasecmp(cmd_line, "OFF") == 0) {
+        g_led_manual_mode = 1;
+        Board_LED_Set(0); // 0 = LED OFF (PC13 HIGH)
+        Telemetry_SendString("OK_LED:OFF\n");
+        return;
+    }
+    if (strcasecmp(cmd_line, "CMD:LED_TOGGLE") == 0 ||
+        strcasecmp(cmd_line, "LED:TOGGLE") == 0 ||
+        strcasecmp(cmd_line, "LED_TOGGLE") == 0 ||
+        strcasecmp(cmd_line, "T") == 0 ||
+        strcasecmp(cmd_line, "TOGGLE") == 0) {
+        g_led_manual_mode = 1;
+        Board_LED_Toggle();
+        Telemetry_SendString("OK_LED:TOGGLE\n");
+        return;
+    }
+    if (strcasecmp(cmd_line, "CMD:LED_AUTO") == 0 ||
+        strcasecmp(cmd_line, "LED:AUTO") == 0 ||
+        strcasecmp(cmd_line, "LED_AUTO") == 0 ||
+        strcasecmp(cmd_line, "A") == 0 ||
+        strcasecmp(cmd_line, "AUTO") == 0) {
+        g_led_manual_mode = 0;
+        Telemetry_SendString("OK_LED:AUTO\n");
+        return;
+    }
+
+    // 7. Motion Control Commands (Full string and single-letter short forms)
+    // In addition to setting FSM command, also toggles LED to provide visual feedback!
+    if (strcasecmp(cmd_line, "CMD:FORWARD") == 0 || strcasecmp(cmd_line, "FORWARD") == 0 || strcasecmp(cmd_line, "F") == 0) {
         RobotFSM_SetCommand(CMD_FORWARD);
+        Board_LED_Toggle();
         Telemetry_SendString("OK_CMD:FORWARD\n");
         return;
     }
-    if (strcmp(cmd_line, "CMD:BACKWARD") == 0 || strcmp(cmd_line, "BACKWARD") == 0 || strcmp(cmd_line, "B") == 0) {
+    if (strcasecmp(cmd_line, "CMD:BACKWARD") == 0 || strcasecmp(cmd_line, "BACKWARD") == 0 || strcasecmp(cmd_line, "B") == 0) {
         RobotFSM_SetCommand(CMD_BACKWARD);
+        Board_LED_Toggle();
         Telemetry_SendString("OK_CMD:BACKWARD\n");
         return;
     }
-    if (strcmp(cmd_line, "CMD:LEFT") == 0 || strcmp(cmd_line, "LEFT") == 0 || strcmp(cmd_line, "L") == 0) {
+    if (strcasecmp(cmd_line, "CMD:LEFT") == 0 || strcasecmp(cmd_line, "LEFT") == 0 || strcasecmp(cmd_line, "L") == 0) {
         RobotFSM_SetCommand(CMD_TURN_LEFT);
+        Board_LED_Toggle();
         Telemetry_SendString("OK_CMD:LEFT\n");
         return;
     }
-    if (strcmp(cmd_line, "CMD:RIGHT") == 0 || strcmp(cmd_line, "RIGHT") == 0 || strcmp(cmd_line, "R") == 0) {
+    if (strcasecmp(cmd_line, "CMD:RIGHT") == 0 || strcasecmp(cmd_line, "RIGHT") == 0 || strcasecmp(cmd_line, "R") == 0) {
         RobotFSM_SetCommand(CMD_TURN_RIGHT);
+        Board_LED_Toggle();
         Telemetry_SendString("OK_CMD:RIGHT\n");
         return;
     }
-    if (strcmp(cmd_line, "CMD:STOP") == 0 || strcmp(cmd_line, "STOP") == 0 || strcmp(cmd_line, "S") == 0) {
+    if (strcasecmp(cmd_line, "CMD:STOP") == 0 || strcasecmp(cmd_line, "STOP") == 0 || strcasecmp(cmd_line, "S") == 0) {
         RobotFSM_SetCommand(CMD_STOP);
+        Board_LED_Toggle();
         Telemetry_SendString("OK_CMD:STOP\n");
         return;
     }
@@ -312,6 +365,8 @@ void Telemetry_RegisterRxHook(void (*hook)(uint8_t))
 
 void Telemetry_OnRxByte(uint8_t byte)
 {
+    s_last_rx_tick = HAL_GetTick();
+
     if (s_rx_hook != NULL) {
         s_rx_hook(byte);
         if (s_huart != NULL) {
@@ -356,6 +411,29 @@ void Telemetry_ProcessIncoming(void)
                 // Buffer overflow protection: flush line
                 s_line_idx = 0;
             }
+        }
+    }
+
+    // 1. Immediate execution for known 1-character BLE/UART commands without trailing newline (after 20ms idle)
+    if (s_line_idx == 1 && s_rx_tail == s_rx_head) {
+        if ((HAL_GetTick() - s_last_rx_tick) >= 20) {
+            char c = s_line_buf[0];
+            if (c == 'F' || c == 'f' || c == 'B' || c == 'b' ||
+                c == 'L' || c == 'l' || c == 'R' || c == 'r' ||
+                c == 'S' || c == 's' || c == '1' || c == '0' ||
+                c == 'T' || c == 't' || c == 'A' || c == 'a') {
+                s_line_buf[1] = '\0';
+                ProcessCommandLine(s_line_buf);
+                s_line_idx = 0;
+            }
+        }
+    }
+    // 2. Multi-character command fallback if no trailing newline was sent (after 100ms idle)
+    else if (s_line_idx > 1 && s_rx_tail == s_rx_head) {
+        if ((HAL_GetTick() - s_last_rx_tick) >= 100) {
+            s_line_buf[s_line_idx] = '\0';
+            ProcessCommandLine(s_line_buf);
+            s_line_idx = 0;
         }
     }
 }

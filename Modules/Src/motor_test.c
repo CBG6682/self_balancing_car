@@ -11,9 +11,9 @@
 #include "gpio.h"
 #include <stdio.h>
 
-#define TEST_PWM_SPEED   1500  // ~35% duty cycle (safe, gentle speed)
-#define TEST_RUN_TIME_MS 1200  // 1.2 seconds run per phase
-#define TEST_STOP_TIME_MS 500  // 0.5 seconds brake between phases
+#define TEST_PWM_SPEED   3800  // ~90% duty cycle (high torque to overcome gearbox friction)
+#define TEST_RUN_TIME_MS 2000  // 2.0 seconds run per phase
+#define TEST_STOP_TIME_MS 600  // 0.6 seconds brake between phases
 
 static void RunPhase(const char *phase_name, int16_t pwm_l, int16_t pwm_r, uint32_t duration_ms)
 {

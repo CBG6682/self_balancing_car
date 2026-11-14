@@ -30,6 +30,11 @@ extern "C" {
 #define TELEMETRY_RX_BUF_SIZE       256
 #define TELEMETRY_CMD_LINE_SIZE     128
 
+/**
+ * @brief  Manual LED control flag (1 = Manual mode via BLE/UART, 0 = Auto 1Hz heartbeat)
+ */
+extern volatile uint8_t g_led_manual_mode;
+
 /* -----------------------------------------------------------------------------
  * Public API Prototypes
  * -------------------------------------------------------------------------- */
