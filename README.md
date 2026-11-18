@@ -1,102 +1,95 @@
 # Hệ Thống Xe Hai Bánh Tự Cân Bằng (STM32F401CCU6 Black Pill)
-## Dual-Loop Cascade PID Control, 1D Kalman Filter, Robot FSM & Automated Python Tuning Pipeline
+## Dual-Loop Cascade PID (Soft-Zone & Short-Brake), 1D Kalman Filter, Robot FSM & Python Toolchain
 
 [![STM32](https://img.shields.io/badge/MCU-STM32F401CCU6-002B49?logo=stmicroelectronics)](https://www.st.com/en/microcontrollers-microprocessors/stm32f401cc.html)
 [![Toolchain](https://img.shields.io/badge/Toolchain-Arm_GNU_GCC_%2B_CMake-blue?logo=cmake)](https://cmake.org/)
+[![BLE](https://img.shields.io/badge/Wireless-ESP32--S3_BLE_5.0-E7352C?logo=espressif)](Tools/esp32_s3_ble_bridge/README.md)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Dự án phát triển firmware nhúng hoàn chỉnh và chuỗi công cụ tự động hóa toán học cho **Xe Hai Bánh Tự Cân Bằng (Two-Wheeled Self-Balancing Robot)**. Hệ thống kết hợp kiến trúc điều khiển thời gian thực trên vi điều khiển STM32F401CCU6 (ARM Cortex-M4 @ 84MHz) với pipeline mô phỏng vật lý phi tuyến, nhận dạng hệ thống ARX và tối ưu hóa PID tự động (Nelder-Mead ITAE) bằng Python.
+Dự án xây dựng hoàn chỉnh firmware nhúng thời gian thực và bộ công cụ kiểm thử – hiệu chuẩn – tinh chỉnh bằng Python cho **Xe Hai Bánh Tự Cân Bằng (Two-Wheeled Self-Balancing Robot)** sử dụng vi điều khiển **STM32F401CCU6** (ARM Cortex-M4 @ 84 MHz), cảm biến **MPU6050**, mạch cầu H **TB6612FNG**, cặp động cơ **GA25 (21.3:1, 937 CPR)** và mạch cầu nối **Bluetooth BLE 5.0 ESP32-S3**.
 
 ---
 
 ## MỤC LỤC
-1. [Tính Năng Nổi Bật](#1-tính-năng-nổi-bật)
+1. [Tính Năng & Thông Số Tối Ưu Cuối Cùng](#1-tính-năng--thông-số-tối-ưu-cuối-cùng)
 2. [Sơ Đồ Đấu Nối Phần Cứng (Hardware Pinout)](#2-sơ-đồ-đấu-nối-phần-cứng-hardware-pinout)
-3. [Kiến Trúc Phần Mềm (Software Architecture)](#3-kiến-trúc-phần-mềm-software-architecture)
+3. [Kiến Trúc Phần Mềm](#3-kiến-trúc-phần-mềm)
 4. [Cấu Trúc Thư Mục Dự Án](#4-cấu-trúc-thư-mục-dự-án)
-5. [Yêu Cầu Môi Trường & Cài Đặt](#5-yêu-cầu-môi-trường--cài-đặt)
-6. [Biên Dịch & Nạp Firmware](#6-biên-dịch--nạp-firmware)
-7. [Chuỗi Công Cụ Tự Động Hóa & Tối Ưu PID](#7-chuỗi-công-cụ-tự-động-hóa--tối-ưu-pid)
-8. [Quy Trình Tinh Chỉnh Khi Thay Đổi Khung Xe](#8-quy-trình-tinh-chỉnh-khi-thay-đổi-khung-xe)
-9. [Đặc Tả Giao Thức Telemetry UART](#9-đặc-tả-giao-thức-telemetry-uart)
+5. [Cài Đặt Môi Trường, Biên Dịch & Nạp Firmware](#5-cài-đặt-môi-trường-biên-dịch--nạp-firmware)
+6. [Hướng Dẫn Bộ Công Cụ Python (Tools)](#6-hướng-dẫn-bộ-công-cụ-python-tools)
+7. [Bảng Lệnh Bluetooth BLE & Giao Thức Telemetry UART](#7-bảng-lệnh-bluetooth-ble--giao-thức-telemetry-uart)
 
 ---
 
-## 1. TÍNH NĂNG
+## 1. TÍNH NĂNG & THÔNG SỐ TỐI ƯU CUỐI CÙNG
 
-- **Thuật toán Cân bằng Đa vòng (Cascade PID Dual-Loop)**:
-  - **Vòng trong (Pitch Angle PD/PID @ 100Hz)**: Ổn định góc nghiêng cực nhanh. Sử dụng trực tiếp tốc độ quay đo từ con quay hồi chuyển (`gyro_rate`) cho khâu vi phân, loại bỏ hoàn toàn hiện tượng xung giật đạo hàm (*derivative kick*) do sai số đo tức thời.
-  - **Vòng ngoài (Linear Speed PI @ 100Hz)**: Đọc vận tốc thực từ encoder, qua bộ lọc số thông thấp IIR ($0.75 / 0.25$) để triệt tiêu nhiễu lượng tử hóa xung, sinh góc nghiêng mục tiêu $\theta_{target} \in [-10^\circ, +10^\circ]$.
-  - **Anti-Windup Clamping**: Giới hạn tích phân chống bão hòa cơ cấu chấp hành.
-- **Xử lý Cảm biến IMU Chuyên sâu**:
-  - Giao tiếp MPU6050 qua I2C1 Fast Mode (400 kHz), lọc số phần cứng DLPF 42Hz.
-  - Tự động đo 300 mẫu lúc khởi động để triệt tiêu trôi lệch tĩnh (*gyro zero-rate bias*).
-  - Thuật toán lọc Kalman 1D tối ưu hóa tốc độ thực thi, dung hòa gia tốc kế trọng trường và con quay hồi chuyển.
-- **Cầu H TB6612FNG & Encoder 2 Bánh**:
-  - Phát PWM 20kHz không phát ra tiếng rít âm tần bằng TIM4 CH3/CH4 (ARR = 4199).
-  - Đọc xung góc 4x Encoder đồng thời bằng TIM2 (Bánh trái) và TIM3 (Bánh phải), tự động xử lý tràn số 16-bit.
-  - Tuyến tính hóa và bù vùng chết động cơ GA25 (`MOTOR_PWM_DEADZONE = 450`) giúp xe phản ứng tức thì ở dải vận tốc siêu chậm.
-- **Máy Trạng Thái Hữu Hạn Robot (FSM)**:
-  - `STATE_BALANCING`: Giữ thăng bằng và nhận lệnh điều khiển di chuyển. Tự động phanh hãm đứng yên khi ngừng phát lệnh.
-  - `STATE_RECOVERY`: Tự động phát xung lực hồi phục cực đại ($\pm 3800$ PWM) khi góc nghiêng trong khoảng $20^\circ < |\theta| \le 45^\circ$. Timeout 1.5s bảo vệ động cơ.
-  - `STATE_IDLE`: Ngắt cầu H (kéo chân PB0 `STBY` xuống LOW và PWM = 0) khi xe ngã quá $45^\circ$, bảo vệ cháy motor và quá dòng pin.
-- **Giao Tiếp Không Chặn & Nạp Nóng PID**:
-  - USART1 Ring Buffer 256 bytes với ngắt Rx, không làm chậm vòng quét 10ms.
-  - Hỗ trợ nạp nóng hệ số PID trực tiếp vào RAM qua lệnh `SET_PID:...` mà không cần flash lại chip.
-- **Pipeline Tự Động Hóa Toán Học (Python Toolchain)**:
-  - Tính nghiệm LQR giải Algebraic Riccati Equation (CARE) có cơ chế MD5 Cache.
-  - Thu thập dữ liệu thực tế kèm cơ chế Fallback mô phỏng phi tuyến Runge-Kutta 4 (RK4).
-  - Nhận dạng hệ thống hàm truyền ARX(2,2) Least Squares đạt $R^2 > 96\%$.
-  - Tối ưu hóa hệ số PID bằng thuật toán Nelder-Mead (ITAE) đưa sai số xác lập về $< 1.0^\circ$.
-  - Kiểm thử kịch bản tự động (`test_control_sequence.py`) đánh giá tự động PASS/FAIL và xuất đồ thị phản hồi 3 kênh.
+### Kiến trúc điều khiển & cơ chế mô phỏng "Đệm ảo" (Virtual Mattress)
+* **Cascade PID 2 vòng @ 100 Hz (TIM10, `dt = 10 ms`)**:
+  * **Vòng trong (Angle PD + Soft-Zone):** Ổn định góc nghiêng thân xe. Trong vùng `|angle_error| < 1.2°`, độ cứng `Kp` giảm mềm còn **60%** (`~24`) rồi tăng tuyến tính mượt lên **100%** (`40.0`) khi gặp ngoại lực, giúp xe đứng êm không giật bánh răng mà vẫn đủ lực đỡ khi bị đẩy. Khâu vi phân dùng trực tiếp `gyro_rate` qua bộ lọc IIR `0.60 / 0.40` ($f_c \approx 10.6\text{ Hz}$), không deadband để giảm chấn liên tục xuống tới `0 dps`.
+  * **Vòng ngoài (Velocity/Position PI tách nhánh):** Lọc tốc độ `0.85 / 0.15` ($f_c \approx 2.8\text{ Hz}$). Nhánh **P** luôn hãm vận tốc thực (`-v_active`) với làm mềm bậc hai trong `±0.02 m/s` để vừa bù phản điện động (Back-EMF) của động cơ GA25 vừa tránh nhiễu 1 xung encoder. Nhánh **I** tích phân không deadband (`target_speed - v_raw`, kẹp động `±2.5°`) giúp neo giữ vị trí đứng yên và dẫn xe chạy tiến/lùi êm.
+* **Cơ cấu chấp hành TB6612FNG & Encoder 4x (`ARR = 999`, `21 kHz`):**
+  * **Deadzone riêng từng bánh** (`PWM_DEADZONE_LEFT = 23`, `PWM_DEADZONE_RIGHT = 17`, ramp mượt `DEADZONE_SMOOTH_THRESHOLD = 10`) và **hệ số cân bằng lực 2 bánh** (`MOTOR_LEFT_SCALE = 1.00`, `MOTOR_RIGHT_SCALE = 0.93`).
+  * **Short-Brake thụ động (`IN1 = HIGH, IN2 = HIGH`)** trong vùng chết `|pwm| <= 2`, tạo lực cản lăn điện từ thụ động giúp xe bám chắc tại điểm cân bằng trên nền gạch nhẵn.
+  * **Giới hạn tải an toàn 80%** (`PWM_MAX_LIMIT = 800`) và **Slew-rate** (`40 PWM/tick`) tránh dòng đỉnh đột ngột.
+* **Lọc cảm biến MPU6050 (I2C1 400 kHz, DLPF 42 Hz):**
+  * Hiệu chuẩn 300 mẫu bias con quay khi khởi động (không trừ nhầm góc nghiêng gia tốc kế), dung hòa bằng **Bộ lọc Kalman 1D**.
+* **Máy trạng thái hữu hạn FSM (`robot_fsm.c`):**
+  * `STATE_IDLE`: Ngắt động cơ (`STBY = PA2 LOW`, `PWM = 0`) khi nghiêng quá `±25°` hoặc quá tải `≥ 80%` liên tục `100 ms`. Chỉ tự tái kích hoạt khi dựng thẳng trong `±10°` đủ `200 ms`.
+  * `STATE_BALANCING`: Cân bằng & nhận lệnh lái từ BLE với **ramp tốc độ mượt** (`RC_MOVE_SPEED_MPS = 0.15 m/s`, `0.004/tick`), **watchdog 500 ms** tự dừng khi mất lệnh.
+
+### Bộ tham số tối ưu cuối cùng (đã lưu cứng trong [`Modules/Inc/pid_AutoConfig.h`](Modules/Inc/pid_AutoConfig.h))
+
+| Tham số | Giá trị | Ý nghĩa |
+| :--- | :--- | :--- |
+| `DEFAULT_ANGLE_KP` / `KI` / `KD` | `40.00` / `0.000` / `1.400` | Bộ PD vòng góc (Soft-Zone `60% → 100%` quanh `±1.2°`) |
+| `DEFAULT_SPEED_KP` / `KI` | `28.00` / `2.500` | Vòng ngoài hãm tốc, bù Back-EMF & neo vị trí |
+| `MECHANICAL_BALANCE_OFFSET_DEG` | `-3.60°` | Góc cân bằng trọng tâm cơ khí |
+| `PWM_TIMER_ARR` / `PWM_MAX_LIMIT` | `999` (`21 kHz`) / `800` | Thang PWM `0–1000`, bảo vệ trần tải `80%` |
+| `PWM_DEADZONE_LEFT` / `RIGHT` | `23` / `17` | Bù vùng chết có tải riêng từng bánh (~85% ngưỡng thật `27 / 20`) |
+| `MOTOR_LEFT_SCALE` / `RIGHT_SCALE` | `1.00` / `0.93` | Cân bằng tốc độ 2 động cơ GA25 |
+| `ENCODER_CPR` | `937` | GA25 tỷ số `21.3:1` ($11 \times 21.3 \times 4 = 937.2$ xung/vòng) |
+| `RC_MOVE_SPEED_MPS` / `RC_TURN_OFFSET_PWM` | `0.15 m/s` / `150` | Tốc độ lái tiến/lùi êm (có ramp) & độ lệch quay trái/phải |
 
 ---
 
 ## 2. SƠ ĐỒ ĐẤU NỐI PHẦN CỨNG (HARDWARE PINOUT)
 
-Toàn bộ cấu hình chân khớp 100% với mã nguồn CubeMX (`Core/Src/gpio.c`, `tim.c`, `i2c.c`, `usart.c`):
+Khớp 100% với cấu hình CubeMX (`Core/Inc/main.h`, `Core/Src/gpio.c`, `tim.c`, `i2c.c`, `usart.c`) và firmware ESP32-S3 (`Tools/esp32_s3_ble_bridge/esp32_s3_ble_bridge.ino`):
 
-| Phân Hệ | Chân Module | Chân STM32 | Tên Cổng & Ngoại Vi | Chức Năng Chi Tiết | Điện Áp |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **MPU6050** | VCC | 3.3V / 5V | 3.3V Pin | Cấp nguồn cảm biến IMU | 3.3V |
-| | GND | GND | GND Pin | Mass chung toàn hệ thống | 0V |
-| | SCL | **PB6** | I2C1_SCL | Xung nhịp I2C 400kHz | 3.3V |
-| | SDA | **PB7** | I2C1_SDA | Đường dữ liệu I2C | 3.3V |
-| **TB6612FNG** | VM | LiPo (+) | Nguồn pin ngoài | Nguồn cấp động cơ GA25 | 11.1V - 12.6V |
-| | VCC | 3.3V / 5V | 3.3V Pin | Cấp nguồn mạch logic TB6612 | 3.3V |
-| | GND | GND | GND Pin | Mass chung nối với Pin & MCU | 0V |
-| | STBY | **PB0** | GPIO_Output | Bật/Tắt cầu H (HIGH=Chạy, LOW=Ngắt) | 3.3V |
-| | PWMA | **PB8** | TIM4_CH3 | Tốc độ bánh trái (PWM 20kHz, ARR=4199) | 3.3V Logic |
-| | PWMB | **PB9** | TIM4_CH4 | Tốc độ bánh phải (PWM 20kHz, ARR=4199) | 3.3V Logic |
-| | AIN1 | **PA4** | GPIO_Output | Chiều quay motor trái (Kênh A1) | 3.3V Logic |
-| | AIN2 | **PA5** | GPIO_Output | Chiều quay motor trái (Kênh A2) | 3.3V Logic |
-| | BIN1 | **PA6** | GPIO_Output | Chiều quay motor phải (Kênh B1) | 3.3V Logic |
-| | BIN2 | **PA7** | GPIO_Output | Chiều quay motor phải (Kênh B2) | 3.3V Logic |
-| | AO1, AO2 | Motor Trái | - | Ngõ ra động cơ GA25 trái | Tới 12V PWM |
-| | BO1, BO2 | Motor Phải | - | Ngõ ra động cơ GA25 phải | Tới 12V PWM |
-| **Encoder Trái**| VCC / GND | 3.3V / GND | - | Cấp nguồn Hall sensor | 3.3V |
-| | Phase A | **PA0** | TIM2_CH1 | Kênh A Encoder bánh trái (Mode TI12) | 3.3V |
-| | Phase B | **PA1** | TIM2_CH2 | Kênh B Encoder bánh trái (Mode TI12) | 3.3V |
-| **Encoder Phải**| VCC / GND | 3.3V / GND | - | Cấp nguồn Hall sensor | 3.3V |
-| | Phase A | **PB4** | TIM3_CH1 | Kênh A Encoder bánh phải (Mode TI12) | 3.3V |
-| | Phase B | **PB5** | TIM3_CH2 | Kênh B Encoder bánh phải (Mode TI12) | 3.3V |
-| **Bluetooth BLE (ESP32-S3)**| 5V / VIN | 5V Pin | Nguồn Buck LM2596 | Cấp nguồn bo mạch ESP32-S3 DevKitC | 5V (300-500mA) |
-| | GND | GND | GND Pin | Mass chung toàn hệ thống | 0V |
-| | GPIO 4 (UART1_TX) | **PA10** | USART1_RX | Nhận lệnh điều khiển từ ESP32-S3 BLE | 3.3V Logic |
-| | GPIO 5 (UART1_RX) | **PA9** | USART1_TX | Gửi telemetry từ STM32 sang ESP32-S3 BLE | 3.3V Logic |
-| **Giao Tiếp Nạp/Debug PC** | Cáp Type-C | Cổng USB ESP32 | - | Nạp firmware BLE bridge & gỡ lỗi | 5V USB |
-| | Cáp USB-UART rời | **PA9/PA10** | USART1 | Tùy chọn cắm trực tiếp PC để auto-tune | 3.3V Logic |
-| **Định Thời Chu Kỳ** | Nội bộ | - | **TIM10** | Ngắt chu kỳ điều khiển 10ms (100Hz) | Nội bộ |
+| Phân Hệ | Chân Module | Chân STM32 | Ngoại Vi / Chức Năng | Điện Áp |
+| :--- | :--- | :--- | :--- | :--- |
+| **MPU6050** | VCC / GND | 3.3V / GND | Nguồn cảm biến IMU | 3.3V / 0V |
+| | SCL | **PB6** | `I2C1_SCL` (Fast Mode 400 kHz) | 3.3V |
+| | SDA | **PB7** | `I2C1_SDA` | 3.3V |
+| **TB6612FNG** | VM | LiPo 3S (+) | Nguồn động cơ GA25 | 11.1V – 12.6V |
+| | VCC / GND | 3.3V / GND | Nguồn logic cầu H (Mass chung với Pin & STM32) | 3.3V / 0V |
+| | STBY | **PA2** | `GPIO_Output` (HIGH = Bật cầu H, LOW = Ngắt an toàn) | 3.3V Logic |
+| | PWMA | **PB8** | `TIM4_CH3` (PWM 21 kHz, `ARR = 999` — bánh trái) | 3.3V Logic |
+| | PWMB | **PB9** | `TIM4_CH4` (PWM 21 kHz, `ARR = 999` — bánh phải) | 3.3V Logic |
+| | AIN1 | **PA4** | `GPIO_Output` (Chiều động cơ trái A1) | 3.3V Logic |
+| | AIN2 | **PA5** | `GPIO_Output` (Chiều động cơ trái A2) | 3.3V Logic |
+| | BIN1 | **PA3** | `GPIO_Output` (Chiều động cơ phải B1) | 3.3V Logic |
+| | BIN2 | **PA7** | `GPIO_Output` (Chiều động cơ phải B2) | 3.3V Logic |
+| | AO1, AO2 / BO1, BO2 | Motor Trái / Phải | Ngõ ra cấp điện 2 động cơ GA25 | Tới 12V PWM |
+| **Encoder Trái** | VCC / GND | 3.3V / GND | Nguồn cảm biến Hall | 3.3V / 0V |
+| | Phase A / B | **PA0** / **PA1** | `TIM2_CH1` / `TIM2_CH2` (4x Encoder Mode) | 3.3V |
+| **Encoder Phải** | VCC / GND | 3.3V / GND | Nguồn cảm biến Hall | 3.3V / 0V |
+| | Phase A / B | **PB4** / **PB5** | `TIM3_CH1` / `TIM3_CH2` (4x Encoder Mode) | 3.3V |
+| **ESP32-S3 BLE Bridge** | 5V / GND | 5V Buck / GND | Nguồn Buck 5V (≥ 500 mA), nối chung GND | 5V / 0V |
+| | **GPIO 6** (`UART1_TX`) | **PA10** | `USART1_RX` (Lệnh từ BLE / PC → STM32, 115200 bps) | 3.3V Logic |
+| | **GPIO 3** (`UART1_RX`) | **PA9** | `USART1_TX` (Telemetry từ STM32 → BLE / PC, 115200 bps) | 3.3V Logic |
+| **Nạp ST-Link SWD** | SWDIO / SWCLK | **PA13** / **PA14** | Giao tiếp nạp & debug SWD | 3.3V |
+| **Đèn trạng thái** | Onboard LED | **PC13** | Active-LOW (`1 Hz` bình thường, `5 Hz` lỗi MPU6050) | 3.3V |
+| **Định thời vòng lặp** | Nội bộ | — | **TIM10** (Ngắt định kỳ `10 ms` / `100 Hz`) | Nội bộ |
 
 > [!WARNING]
-> Cực âm (`GND`) của Pin LiPo 3S, vi điều khiển STM32 và mạch cầu H TB6612 **BẮT BUỘC PHẢI NỐI CHUNG** với nhau để đảm bảo mức điện áp tham chiếu đồng nhất.
+> Cực âm (`GND`) của **Pin LiPo 3S**, **STM32 BlackPill**, **TB6612FNG**, **MPU6050** và **ESP32-S3** bắt buộc nối chung điểm mass.
 
 ---
 
-## 3. KIẾN TRÚC PHẦN MỀM (SOFTWARE ARCHITECTURE)
+## 3. KIẾN TRÚC PHẦN MỀM
 
-```
+```text
                        +-----------------------------------+
                        |         Core / main.c             |
                        | (100Hz Master Loop via TIM10 IRQ) |
@@ -107,14 +100,14 @@ Toàn bộ cấu hình chân khớp 100% với mã nguồn CubeMX (`Core/Src/gpi
      v                   v                                   v                   v
 +------------+   +-------------------+              +------------------+   +------------+
 |  MPU6050   |   |   Cascade PID     |              |   TB6612 Motor   |   | Telemetry  |
-|  & Kalman  |-->|  Dual-Loop Core   |------------->|  & 4x Encoders   |   |    UART    |
-| (PB6/PB7)  |   | (Inner PD+Out PI) |   (PWM L/R)  | (PB8/9, PA0/1/4) |   | (PA9/PA10) |
+| Kalman 1D  |-->| Soft-Zone + PI    |------------->| Short-Brake + 4x |   | UART / BLE |
+| (PB6/PB7)  |   | (Inner PD+Out PI) |  (PWM L/R)   | (PB8/9, PA2..7)  |   | (PA9/PA10) |
 +------------+   +---------+---------+              +------------------+   +-----+------+
                            |                                                     ^
                            v                                                     |
                  +-------------------+                                           |
                  |     Robot FSM     |-------------------------------------------+
-                 | (BALANCING, RECOV)|          (Telemetry Status Broadcast)
+                 | (IDLE/BAL/RECOV)  |         (DATA + DBG Telemetry 100Hz)
                  +-------------------+
 ```
 
@@ -122,196 +115,163 @@ Toàn bộ cấu hình chân khớp 100% với mã nguồn CubeMX (`Core/Src/gpi
 
 ## 4. CẤU TRÚC THƯ MỤC DỰ ÁN
 
-```
+```text
 self_balancing_car/
 ├── CMakeLists.txt              # Cấu hình build CMake đa nền tảng
-├── CMakePresets.json           # Cấu hình Presets Debug / Release
-├── setup.sh / setup.bat        # Script tự động cài môi trường Python venv
-├── build_firmware.sh / .bat    # Script biên dịch firmware ra .elf, .bin, .hex
-├── run_pipeline.sh / .bat      # Script chạy chuỗi tối ưu hóa PID tự động
-├── .gitignore                  # Cấu hình Git tiêu chuẩn
-├── Core/
-│   ├── Inc/                    # Header cấu hình CubeMX (main.h, tim.h, ...)
-│   └── Src/                    # Mã nguồn chính CubeMX (main.c, gpio.c, ...)
-├── Modules/                    # Thư viện điều khiển xe tự cân bằng chuyên dụng
+├── CMakePresets.json           # Presets Debug / Release (Ninja)
+├── setup.sh / setup.bat        # Tự động tạo Python venv & cài thư viện
+├── build_firmware.sh / .bat    # Biên dịch firmware ra .elf, .bin, .hex
+├── run_pipeline.sh / .bat      # Menu khởi chạy nhanh toàn bộ công cụ Python
+├── ARCHITECTURE_PLAN.md        # Tài liệu thiết kế kiến trúc phần mềm chi tiết
+├── Core/                       # Mã nguồn khởi tạo ngoại vi STM32CubeMX
+├── Drivers/                    # Thư viện CMSIS & STM32F4xx HAL
+├── Modules/                    # Thư viện điều khiển xe tự cân bằng
 │   ├── Inc/
-│   │   ├── pid_AutoConfig.h    # File tham số PID tự động sinh bởi Python
-│   │   ├── cascade_pid.h       # Khai báo cấu trúc & hàm Cascade PID
-│   │   ├── motor_test.h        # Khai báo module kiểm tra động cơ độc lập
-│   │   ├── mpu6050_filter.h    # Khai báo driver MPU6050 & Lọc Kalman
-│   │   ├── motor_encoder.h     # Khai báo driver TB6612 & Encoder 4x
-│   │   ├── robot_fsm.h         # Khai báo máy trạng thái hữu hạn FSM
-│   │   └── telemetry_uart.h    # Khai báo ring buffer UART & parser lệnh
-│   └── Src/
-│       ├── cascade_pid.c       # Hiện thực vòng lặp PID kép & chống bão hòa
-│       ├── motor_test.c        # Hiện thực chu trình kiểm tra động cơ tự động
-│       ├── mpu6050_filter.c    # Hiện thực giao tiếp I2C1 & Kalman 1D
-│       ├── motor_encoder.c     # Hiện thực điều khiển động cơ & bù deadzone
-│       ├── robot_fsm.c         # Hiện thực logic chuyển trạng thái FSM
-│       └── telemetry_uart.c    # Hiện thực ngắt nhận USART1 & Telemetry
-└── Tools/                      # Bộ công cụ kiểm tra module, mô phỏng & tối ưu PID
-    ├── MODULE_TEST_GUIDE.md    # Hướng dẫn chi tiết kiểm tra độc lập từng module phần cứng
-    ├── requirements.txt        # Danh sách thư viện Python cần thiết
-    ├── robot_config.yaml       # File cấu hình thông số vật lý của khung xe
-    ├── computed_gains.json     # Cache lưu trữ bộ thông số PID tối ưu
-    ├── flash_hid.py            # Công cụ nạp firmware USB HID (không cần ST-Link)
-    ├── test_esp32_loopback.py  # Test độc lập cổng ESP32 & chân GPIO 4/5
-    ├── test_bridge_live.py     # Test thông tuyến thời gian thực ESP32 <-> STM32
-    ├── sensor_test_live.py     # Bảng theo dõi cảm biến MPU6050 & Encoder thời gian thực
-    ├── motor_test_interactive.py # Bảng điều khiển tương tác kiểm tra động cơ TB6612
-    ├── hardware_check.py       # Bộ chẩn đoán, cân chỉnh Zero Trim & Polarity toàn diện
-    ├── sim_and_init_pid.py      # Giải LQR & khởi tạo PID có cache
-    ├── data_acquisition.py      # Thu thập UART hoặc sinh Mock RK4
-    ├── auto_tune_pid.py         # Nhận dạng ARX & Nelder-Mead ITAE
-    ├── test_control_sequence.py # Kiểm thử kịch bản & xuất đồ thị
-    └── esp32_s3_ble_bridge/     # Firmware BLE 5.0 cho mạch Bluetooth ESP32-S3 rời
-        ├── esp32_s3_ble_bridge.ino # Mã nguồn Arduino/ESP-IDF BLE-to-UART Bridge
-        └── README.md            # Hướng dẫn nạp và kết nối điện thoại qua BLE
+│   │   ├── pid_AutoConfig.h    # Tập trung toàn bộ hằng số PID, Deadzone, Offset, Polarity
+│   │   ├── cascade_pid.h       # API Cascade PID (Soft-Zone & tách nhánh P/I)
+│   │   ├── mpu6050_filter.h    # API driver MPU6050 I2C1 & Kalman 1D
+│   │   ├── motor_encoder.h     # API điều khiển TB6612, Short-Brake, Probe & Encoder 4x
+│   │   ├── robot_fsm.h         # API máy trạng thái FSM & ramp tốc độ lái
+│   │   ├── telemetry_uart.h    # API Ring Buffer UART1 & parser lệnh BLE
+│   │   ├── motor_test.h        # API chu trình test động cơ
+│   │   └── uart_loopback_test.h
+│   └── Src/                    # Hiện thực tương ứng các module trên
+└── Tools/                      # Bộ công cụ kiểm thử, hiệu chuẩn, nạp & tinh chỉnh
+    ├── MODULE_TEST_GUIDE.md    # Hướng dẫn kiểm thử từng linh kiện & đo VOM
+    ├── robot_config.yaml       # Thông số vật lý khung xe, động cơ & PID mặc định
+    ├── requirements.txt        # Thư viện Python (pyserial, numpy, scipy, matplotlib, pyyaml)
+    ├── logger_utils.py         # Tiện ích log màu & lọc cổng serial
+    ├── flash_stlink.sh/.py/.bat# Nạp firmware STM32 qua ST-Link V2/V3 (SWD)
+    ├── flash_usb.sh / flash_hid.py # Nạp firmware qua USB HID Bootloader
+    ├── setup_udev.sh           # Cấu hình quyền cổng USB / ST-Link trên Linux
+    ├── check_connection.py     # Quét & chẩn đoán kết nối USB-UART / ESP32 Bridge
+    ├── system_self_test.py     # Kiểm tra tổng thể từng linh kiện có xác nhận
+    ├── live_sensor_calib.py    # Kiểm tra & hiệu chuẩn cảm biến MPU6050, Encoder
+    ├── find_deadzone.py        # Đo tự động ngưỡng vùng chết từng động cơ GA25
+    ├── find_zero_balance.py    # Đo góc cân bằng trọng tâm cơ khí (Offset)
+    ├── live_balance_tuning.py  # Tinh chỉnh PID & theo dõi trực tiếp khi xe chạy
+    ├── esp32_tune_monitor.py   # Terminal giám sát & gửi lệnh nóng qua ESP32 Bridge
+    ├── record_session.py       # Ghi phiên telemetry 100Hz (DATA + DBG) ra CSV
+    ├── sim_and_init_pid.py     # Mô phỏng con lắc ngược & giải LQR khởi tạo PID
+    ├── auto_tune_pid.py        # Nhận dạng hệ thống ARX & tối ưu Nelder-Mead ITAE
+    └── esp32_s3_ble_bridge/    # Firmware BLE 5.0 cho mạch cầu nối ESP32-S3
+        ├── esp32_s3_ble_bridge.ino
+        └── README.md
 ```
 
 ---
 
-## 5. YÊU CẦU MÔI TRƯỜNG & CÀI ĐẶT
+## 5. CÀI ĐẶT MÔI TRƯỜNG, BIÊN DỊCH & NẠP FIRMWARE
 
-### Trên Linux (Ubuntu / Debian / Arch):
-```bash
-# Cài đặt Arm GCC Toolchain, CMake và Ninja
-sudo apt update
-sudo apt install -y gcc-arm-none-eabi cmake ninja-build python3 python3-venv python3-pip
-
-# Khởi tạo môi trường ảo Python và cài đặt dependencies
-./setup.sh
-```
-
-### Trên Windows (Command Prompt / PowerShell):
-1. Tải và cài đặt **Arm GNU Toolchain** (chọn tùy chọn thêm vào `PATH`).
-2. Tải và cài đặt **CMake** (từ cmake.org) và **Python 3.8+** (chọn tick *"Add python.exe to PATH"*).
-3. Chạy file cài đặt môi trường:
-```cmd
-setup.bat
-```
-
----
-
-## 6. BIÊN DỊCH & NẠP FIRMWARE
-
-### Biên dịch:
-- **Linux / macOS**:
+### 5.1. Cài đặt môi trường
+* **Linux (Ubuntu / Debian / Arch):**
   ```bash
-  ./build_firmware.sh
+  sudo apt update
+  sudo apt install -y gcc-arm-none-eabi cmake ninja-build stlink-tools python3 python3-venv python3-pip
+  ./setup.sh
   ```
-- **Windows**:
-  ```cmd
-  build_firmware.bat
-  ```
+* **Windows:** Cài Arm GNU Toolchain, CMake, Python 3.8+ (thêm vào `PATH`), sau đó chạy `setup.bat`.
 
-File đầu ra được lưu tại `build/Debug/`:
-- `self_balancing_car.elf`: Chứa bảng biểu tượng phục vụ gỡ lỗi SWD/JTAG.
-- `self_balancing_car.bin`: Mã máy nhị phân thuần túy nạp trực tiếp vào Flash.
-- `self_balancing_car.hex`: Định dạng Intel Hex.
-
-### Nạp Firmware:
-Sử dụng mạch nạp **ST-Link v2** nối với chân `SWDIO` (PA13), `SWCLK` (PA14), `GND`, `3.3V`:
-- **Qua OpenOCD / st-flash (Linux)**:
-  ```bash
-  st-flash write build/Debug/self_balancing_car.bin 0x08000000
-  ```
-- **Qua STM32CubeProgrammer**:
-  Mở phần mềm, kết nối ST-Link, chọn file `build/Debug/self_balancing_car.hex` và nhấn **Start Programming**.
-
----
-
-## 7. CHUỖI TỰ ĐỘNG HÓA & TỐI ƯU PID
-
-Dự án cung cấp bộ công cụ tự động hóa khép kín không phụ thuộc vào việc phải căn chỉnh thủ công từng hệ số PID:
-
-### Chạy trọn vẹn quy trình (khuyến nghị):
-- **Linux**: `./run_pipeline.sh --all`
-- **Windows**: `run_pipeline.bat --all`
-
-Quy trình sẽ tự động thực hiện 4 bước liên hoàn:
-1. **Mô Phỏng Vật Lý & Khởi Tạo LQR (`sim_and_init_pid.py`)**: Đọc mô hình vật lý từ `Tools/robot_config.yaml`, giải phương trình Riccati liên tục, phân bổ nghiệm LQR thành hệ số Cascade PID và lưu vào `Tools/computed_gains.json`.
-2. **Thu Thập Dữ Liệu / Giả Lập Fallback (`data_acquisition.py`)**: Tự động quét các cổng serial gửi bắt tay `PING`. Nếu chưa kết nối robot thật, tự động kích hoạt bộ sinh dữ liệu vật lý phi tuyến Runge-Kutta 4 xuất ra file `Tools/mock_telemetry.csv`.
-3. **Nhận Dạng Hệ Thống & Tối Ưu Hóa PID (`auto_tune_pid.py`)**: Khớp mô hình hàm truyền rời rạc ARX(2,2) bằng thuật toán Bình phương Tối thiểu (Least Squares) đạt $R^2 > 96\%$, sau đó tối ưu hóa hệ số PID giảm thiểu hàm phạt ITAE. Tự động ghi đè file header C `Modules/Inc/pid_AutoConfig.h`.
-4. **Kiểm Thử Kịch Bản Điều Khiển Tự Động (`test_control_sequence.py`)**: Chạy kịch bản tự động gồm 6 giai đoạn (`BALANCE` $\rightarrow$ `FORWARD` $\rightarrow$ `STOP` $\rightarrow$ `BACKWARD` $\rightarrow$ `TURN` $\rightarrow$ `STOP`), tự động chấm điểm và lưu ảnh đồ thị `Tools/test_result_plot.png`.
-5. **Biên Dịch Lại Firmware**: Tự động gọi biên dịch lại firmware STM32 với bộ thông số mới.
-
----
-
-## 8. QUY TRÌNH TINH CHỈNH KHI THAY ĐỔI KHUNG XE
-
-Khi bạn chế tạo khung xe mới, thay pin có trọng lượng khác hoặc đổi kích thước bánh xe, bạn **KHÔNG CẦN** sửa bất kỳ dòng mã nguồn C nào. Hãy làm theo 3 bước sau:
-
-1. Mở file [Tools/robot_config.yaml](Tools/robot_config.yaml) và cập nhật thông số thực tế của bạn:
-   ```yaml
-   chassis:
-     M: 0.85          # Khối lượng thân xe (kg)
-     m: 0.08          # Khối lượng 2 bánh xe (kg)
-     R: 0.0325        # Bán kính bánh xe (m) (Ví dụ: bánh D=65mm -> R=0.0325)
-     L: 0.075         # Khoảng cách từ trục bánh xe tới khối tâm COM (m)
-     W: 0.16          # Khoảng cách giữa 2 bánh xe (m)
-     I_body: 0.0035   # Mô men quán tính thân xe (kg*m^2)
-   motor:
-     pwm_max: 4199
-     pwm_deadzone: 450
-     encoder_cpr: 330 # Số xung encoder sau khi qua hộp số
-   ```
-2. Chạy lệnh tự động hóa:
-   ```bash
-   ./run_pipeline.sh --all
-   ```
-3. Nạp file `build/Debug/self_balancing_car.bin` mới sinh vào STM32. Robot sẽ tự động đạt trạng thái cân bằng tối ưu!
-
-### Kiểm Tra Phần Cứng Trực Quan & Tune Thực Tế Với Xe Thật:
-Sau khi đấu nối dây vào xe, bạn có thể kích hoạt công cụ tương tác phần cứng:
+### 5.2. Biên dịch firmware
 ```bash
-./run_pipeline.sh --hardware
-# hoặc chạy trực tiếp bằng python:
-./venv/bin/python3 Tools/hardware_check.py
+# Linux / macOS:
+./build_firmware.sh
+# hoặc biên dịch tăng cường nhanh bằng Ninja:
+ninja -C build/Debug
+
+# Windows:
+build_firmware.bat
 ```
-Bộ công cụ cung cấp:
-- **Thước đo góc nghiêng ASCII thời gian thực**: Xác thực góc Pitch MPU6050 tăng khi nghiêng tới và giảm khi nghiêng lui.
-- **Bộ đếm xung Encoder trực tiếp**: Lăn bánh xe để xác nhận chiều đếm encoder chuẩn xác.
-- **Phát xung thử chiều quay động cơ an toàn**: Kiểm tra chiều quay của 2 bánh xe GA25.
-- **Đảo chiều Polarity tức thì (Hot Swap)**: Tùy chỉnh chiều động cơ/encoder trực tiếp trong RAM qua UART.
-- **Căn chỉnh điểm 0° thăng bằng cơ học (Zero Balance Trim)**: Khử lệch do trọng tâm pin/khung xe.
-- **Thu thập Telemetry thực tế & Tối ưu hóa Nelder-Mead**: Tự động nhận dạng mô hình ARX từ dữ liệu xe thật và nạp PID tối ưu.
+File nhị phân đầu ra: `build/Debug/self_balancing_car.bin` (cùng `.elf`, `.hex`).
+
+### 5.3. Nạp firmware vào STM32
+* **Qua ST-Link V2/V3 (khuyến nghị):** Nối `SWDIO (PA13)`, `SWCLK (PA14)`, `GND`, `3.3V` rồi chạy:
+  ```bash
+  ./Tools/flash_stlink.sh          # Linux / macOS
+  Tools\flash_stlink.bat           # Windows
+  ```
+* **Qua USB HID Bootloader (nếu mạch có WeAct HID Bootloader):**
+  ```bash
+  ./Tools/flash_usb.sh
+  ```
 
 ---
 
-## 9. ĐẶC TẢ GIAO THỨC TELEMETRY UART & BLUETOOTH BLE (ESP32-S3)
+## 6. HƯỚNG DẪN BỘ CÔNG CỤ PYTHON (`Tools/`)
 
-Tốc độ Baud mặc định: **115200 bps**, 8 data bits, no parity, 1 stop bit (USART1 - PA9/PA10).
-Hệ thống sử dụng **ESP32-S3 DevKitC** làm mạch cầu nối **Bluetooth Low Energy (BLE 5.0)** theo chuẩn dịch vụ **Nordic UART Service (NUS)**:
-- **Service UUID**: `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
-- **RX Char (Điện thoại -> Xe)**: `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` (Write)
-- **TX Char (Xe -> Điện thoại)**: `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` (Notify)
-- Xem hướng dẫn chi tiết nạp code và kết nối app tại [Tools/esp32_s3_ble_bridge/README.md](Tools/esp32_s3_ble_bridge/README.md).
-
-### Lệnh gửi từ App Bluetooth (BLE) / Máy tính tới STM32:
-- `PING\n`: Bắt tay kết nối (STM32 phản hồi `PONG\n`).
-- `ESP:PING\n`: Bắt tay từ bo mạch cầu nối ESP32-S3 (STM32 phản hồi `ESP:PONG\n`).
-- `STATUS\n` hoặc `CMD:STATUS\n`: Truy vấn trạng thái chi tiết hệ thống (FSM, Pitch, Gyro, Vận tốc, Xung Encoder trái/phải, MPU alive, BLE connected).
-- `CALIB_ZERO\n` hoặc `CALIB_ZERO:<offset>\n`: Lưu góc cân bằng trọng tâm cơ học tự nhiên của xe.
-- `SET_POLARITY:<ml>,<mr>,<el>,<er>\n`: Đảo chiều quay động cơ và encoder trực tiếp trong RAM (ví dụ: `SET_POLARITY:1,-1,1,-1\n`).
-- `TEST:MOTORS\n`, `TEST:MOTOR_L\n`, `TEST:MOTOR_R\n`: Thử nghiệm xung quay an toàn (0.5s @ 1200 PWM) để kiểm tra đấu nối phần cứng động cơ.
-- `BLE:CONNECTED\n`: Sự kiện khi điện thoại kết nối BLE (STM32 xác nhận `OK_BLE:CONNECTED\n`).
-- `BLE:DISCONNECTED\n`: **Cơ chế an toàn (Fail-safe)**: Khi ngắt kết nối BLE, ESP32-S3 lập tức gửi lệnh này để STM32 tự động phanh gấp (`CMD_STOP`) giữ xe thăng bằng đứng yên.
-- `START_STREAM\n`: Bật chế độ phát dữ liệu Telemetry định kỳ 10ms.
-- `STOP_STREAM\n`: Dừng phát dữ liệu Telemetry.
-- `SET_PID:<ang_kp>,<ang_ki>,<ang_kd>,<spd_kp>,<spd_ki>\n`: Cập nhật trực tiếp bộ thông số PID vào RAM khi xe đang đứng. Ví dụ: `SET_PID:120.0,1.5,3.2,8.0,0.5\n`. Phản hồi: `OK_PID:...\n`.
-- `FORWARD\n` (hoặc `F\n`), `BACKWARD\n` (hoặc `B\n`), `LEFT\n` (hoặc `L\n`), `RIGHT\n` (hoặc `R\n`), `STOP\n` (hoặc `S\n`): Các lệnh điều khiển chuyển động thủ công (tương thích các nút Macro trong app *Serial Bluetooth Terminal*).
-
-### Dữ liệu Telemetry STM32 phát lên (khi bật stream):
-Định dạng chuỗi ASCII kết thúc bằng ký tự xuống dòng `\n`:
+Bạn có thể mở menu tương tác chứa toàn bộ công cụ bằng:
+```bash
+./run_pipeline.sh     # Linux / macOS
+run_pipeline.bat      # Windows
 ```
-DATA:<pitch_angle>,<gyro_rate>,<pwm_average>,<enc_left_pulses>,<enc_right_pulses>,<fsm_state>\n
-```
-*Ví dụ*: `DATA:1.24,-2.50,150,1204,1198,1\n`
-- `pitch_angle`: Góc nghiêng Pitch hiện tại (độ).
-- `gyro_rate`: Tốc độ quay quanh trục Pitch (độ/giây).
-- `pwm_average`: Giá trị PWM trung bình cấp cho 2 motor (-4199 đến 4199).
-- `enc_left_pulses`, `enc_right_pulses`: Tổng số xung encoder tích lũy.
-- `fsm_state`: Trạng thái máy hữu hạn (1: BALANCING, 2: RECOVERY, 0: IDLE).
+
+Hoặc gọi trực tiếp từng công cụ theo đúng quy trình kiểm thử & hiệu chuẩn:
+
+| Bước | Công cụ | Lệnh chạy nhanh | Mục đích |
+| :---: | :--- | :--- | :--- |
+| **1** | `check_connection.py` | `./run_pipeline.sh -c` | Quét cổng `/dev/ttyACM*`, kiểm tra bắt tay `PING`/`ESP:PING` với ESP32-S3 & STM32 |
+| **2** | `system_self_test.py` | `./run_pipeline.sh -d` | Kiểm tra tổng thể từng phần cứng: UART, MPU6050, Encoder trái/phải, cầu H TB6612 & 2 động cơ |
+| **3** | `live_sensor_calib.py` | `./run_pipeline.sh -s` | Kiểm tra chiều góc Pitch, tốc độ Gyro và chiều đếm xung Encoder 2 bánh theo thời gian thực |
+| **4** | `find_deadzone.py` | `./run_pipeline.sh -dz` | Tăng dần PWM từ 0 để tìm ngưỡng bắt đầu quay có tải của từng động cơ Trái/Phải |
+| **5** | `find_zero_balance.py` | `./run_pipeline.sh -o` | Đo góc nghiêng trọng tâm tĩnh khi dựng cân bằng xe để xác định `MECHANICAL_BALANCE_OFFSET_DEG` |
+| **6** | `sim_and_init_pid.py` | `./run_pipeline.sh --sim` | Giải LQR trên mô hình vật lý từ `Tools/robot_config.yaml` để có bộ PID khởi điểm |
+| **7** | `esp32_tune_monitor.py` | `./run_pipeline.sh -m` | Màn hình giám sát & gửi lệnh nóng `SET_PID`, `OFFSET`, `DEADZONE`, `AUTO/OFF` qua cổng nối tiếp |
+| **8** | `live_balance_tuning.py` | `./run_pipeline.sh -t` | Công cụ tinh chỉnh PID trực tiếp theo từng vòng khi xe đang chạy thực tế |
+| **9** | `record_session.py` | `./run_pipeline.sh -r` | Ghi phiên dữ liệu 100 Hz (`DATA:` + `DBG:`) để phân tích dao động và đáp ứng tốc độ |
+| **10** | `auto_tune_pid.py` | `./run_pipeline.sh --autotune` | Nhận dạng mô hình ARX(2,2) & tối ưu hóa PID theo chỉ số ITAE (Nelder-Mead) |
+
+Chi tiết kiểm thử từng linh kiện và đo VOM xem tại [`Tools/MODULE_TEST_GUIDE.md`](Tools/MODULE_TEST_GUIDE.md).
 
 ---
+
+## 7. BẢNG LỆNH BLUETOOTH BLE & GIAO THỨC TELEMETRY UART
+
+* **UART1:** `115200 bps`, 8N1 (`PA9/PA10`).
+* **ESP32-S3 BLE 5.0 (Nordic UART Service — NUS):**
+  * Tên thiết bị: `STM32_Balance_Car`
+  * Service UUID: `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
+  * RX (App → Xe): `6E400002-B5A3-F393-E0A9-E50E24DCCA9E`
+  * TX (Xe → App): `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`
+  * App khuyến nghị: *Serial Bluetooth Terminal* (Android) hoặc *nRF Connect / BLE Terminal* (iOS). Xem thêm tại [`Tools/esp32_s3_ble_bridge/README.md`](Tools/esp32_s3_ble_bridge/README.md).
+
+### 7.1. Bảng đầy đủ lệnh Bluetooth (BLE) / UART gửi tới STM32
+
+| Nhóm | Lệnh (không phân biệt hoa/thường) | Chức năng & Ví dụ |
+| :--- | :--- | :--- |
+| **Điều khiển lái** | `F` / `FORWARD` | Chạy tiến êm (`0.15 m/s`, có ramp mượt; tự dừng sau 500 ms nếu nhả nút) |
+| | `B` / `BACKWARD` | Chạy lùi êm (`-0.15 m/s`, có ramp mượt) |
+| | `L` / `LEFT` | Quay tại chỗ sang trái (`turn_offset = -150`) |
+| | `R` / `RIGHT` | Quay tại chỗ sang phải (`turn_offset = +150`) |
+| | `S` / `HALT` | Dừng di chuyển, giữ thăng bằng đứng yên tại chỗ |
+| **Chế độ vận hành** | `AUTO` / `START` / `RUN` | Bật chế độ tự cân bằng (dựng xe trong `±10°` đủ `0.2 s` sẽ chạy) |
+| | `OFF` / `STOP` | Ngắt khẩn cấp động cơ (`STBY = LOW`, `PWM = 0`) |
+| **Tinh chỉnh nóng (RAM)** | `SET_PID:kp,ki,kd,skp,ski` | Đổi 5 hệ số PID ngay lập tức. VD: `SET_PID:40,0,1.4,28,2.5` (hoặc `PID:...`) |
+| | `GET_PID` / `PID?` | Đọc 5 hệ số PID hiện tại |
+| | `OFFSET:<góc>` / `SET_OFFSET:<góc>` | Chỉnh góc cân bằng cơ học (độ). VD: `OFFSET:-3.60` |
+| | `GET_OFFSET` / `OFFSET?` | Xem góc Offset hiện tại |
+| | `DEADZONE:<val>` / `SET_DEADZONE:<val>` | Dịch vùng chết 2 bánh (`0..400`, giữ nguyên độ lệch Trái/Phải; `0` = tắt) |
+| | `DEADZONE?` / `GET_DEADZONE` | Xem giá trị Deadzone tham chiếu hiện tại |
+| | `SET_POLARITY:ml,mr,el,er` | Đảo chiều cực tính motor/encoder (`+1` hoặc `-1`). VD: `SET_POLARITY:1,-1,-1,1` |
+| **Tra cứu & Tiện ích** | `PARAMS` / `INFO` / `STATUS` | In bảng tổng hợp toàn bộ PID, Offset, Deadzone, chế độ, Pitch, Gyro, vận tốc, Encoder |
+| | `HELP` / `?` | In nhanh danh sách lệnh trên điện thoại |
+| | `PING` / `ESP:PING` | Kiểm tra thông tuyến (`PONG` / `ESP:PONG`) |
+| | `RESET_ENC` / `ZERO_ENC` | Đặt lại bộ đếm xung 2 encoder về `(0, 0)` |
+| | `START_STREAM` / `STOP_STREAM` | Bật / tắt phát luồng telemetry 100 Hz (`DATA:` + `DBG:`) |
+| **Kiểm thử phần cứng** | `PROBE` / `PROBE:A` / `PROBE:B` / `PROBE:PWM` | Khóa cứng `STBY = 0V` và kích `AIN/BIN/PWM` lên `3.3V` để đo đồng hồ VOM an toàn |
+| | `MOTOR:<pwm_l>,<pwm_r>` | Chạy trực tiếp 2 bánh qua bù Deadzone & Scale. VD: `MOTOR:200,200`, `MOTOR:0,0` |
+| | `TEST:MOTOR_L` / `TEST:MOTOR_R` / `TEST:MOTORS` | Chạy thử nhanh từng bánh hoặc cả 2 bánh trong `0.6–0.8 s` rồi tự tắt |
+| | `LED:ON` / `LED:OFF` / `LED:TOGGLE` / `LED:AUTO` | Kiểm tra thủ công đèn LED `PC13` trên BlackPill |
+
+### 7.2. Định dạng luồng Telemetry STM32 phát lên (khi bật `START_STREAM`)
+Mỗi chu kỳ `10 ms` (100 Hz), STM32 phát 2 dòng ASCII đồng bộ:
+```text
+DATA:<pitch_deg>,<gyro_dps>,<pwm_avg>,<enc_left>,<enc_right>,<fsm_state>
+DBG:<target_angle_deg>,<speed_filtered_mps>,<speed_i_deg>,<pwm_left>,<pwm_right>
+```
+*Ví dụ:*
+```text
+DATA:-3.55,1.20,14,120,118,1
+DBG:-0.18,0.025,-0.04,14,-13
+```
+* `fsm_state`: `0` = `IDLE`, `1` = `BALANCING`, `2` = `RECOVERY`.
+* `pwm_left`, `pwm_right`: lệnh PWM đã nhân `MOTOR_SCALE` và cực tính chiều quay từng bánh.

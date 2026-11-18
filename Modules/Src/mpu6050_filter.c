@@ -155,7 +155,7 @@ HAL_StatusTypeDef MPU6050_Init(I2C_HandleTypeDef *hi2c)
 
     memset(&s_sensor_data, 0, sizeof(mpu6050_data_t));
     Kalman_Init(&s_sensor_data.kalman);
-    s_sensor_data.accel_pitch_offset = MECHANICAL_BALANCE_OFFSET_DEG;
+    s_sensor_data.accel_pitch_offset = 0.0f; // Physical balance offset is handled cleanly in cascade_pid
 
     // 1. Scan I2C bus to find responding device
     char dbg[96];
@@ -228,44 +228,28 @@ void MPU6050_Calibrate(void)
 {
     const uint16_t CALIBRATION_SAMPLES = 300;
     float sum_gyro_pitch = 0.0f;
-    float sum_accel_pitch = 0.0f;
     uint8_t raw_buffer[14];
     uint16_t valid_samples = 0;
 
     for (uint16_t i = 0; i < CALIBRATION_SAMPLES; i++) {
         if (MPU6050_ReadRegisters(MPU6050_REG_ACCEL_XOUT_H, raw_buffer, 14, 20) == HAL_OK) {
-            int16_t ax_raw = (int16_t)((raw_buffer[0] << 8) | raw_buffer[1]);
-            int16_t ay_raw = (int16_t)((raw_buffer[2] << 8) | raw_buffer[3]);
-            int16_t az_raw = (int16_t)((raw_buffer[4] << 8) | raw_buffer[5]);
             int16_t gx_raw = (int16_t)((raw_buffer[8] << 8) | raw_buffer[9]);
-
-            float ax = (float)ax_raw / MPU6050_ACCEL_SENS_4G;
-            float ay = (float)ay_raw / MPU6050_ACCEL_SENS_4G;
-            float az = (float)az_raw / MPU6050_ACCEL_SENS_4G;
             float gx = (float)gx_raw / MPU6050_GYRO_SENS_2000DPS;
 
-            // Pitch angle from accelerometer: atan2(ay, sqrt(ax^2 + az^2))
-            float pitch_acc = atan2f(ay, sqrtf(ax * ax + az * az)) * RAD_TO_DEG;
-
             sum_gyro_pitch += gx;
-            sum_accel_pitch += pitch_acc;
             valid_samples++;
         }
         HAL_Delay(2);
     }
 
     if (valid_samples > 100) {
+        // Calibrate gyroscope zero bias only.
+        // Accelerometer measures absolute gravity vector and must NOT be zeroed
+        // to an arbitrary holding angle at boot time.
         s_sensor_data.gyro_pitch_offset = sum_gyro_pitch / (float)valid_samples;
-
-        // Safety check: Only accept auto zero calibration if robot is held near vertical (< +/-8 deg).
-        // If robot is lying down or resting at kickstand during power-on, do NOT treat tilted angle as zero!
-        float avg_accel = sum_accel_pitch / (float)valid_samples;
-        if (fabsf(avg_accel) <= 8.0f) {
-            s_sensor_data.accel_pitch_offset = avg_accel;
-        } else {
-            s_sensor_data.accel_pitch_offset = MECHANICAL_BALANCE_OFFSET_DEG;
-        }
     }
+
+    s_sensor_data.accel_pitch_offset = 0.0f;
 
     // Seed Kalman filter angle with current baseline accelerometer angle
     s_sensor_data.kalman.angle = 0.0f;

@@ -1,34 +1,49 @@
 # Cấu hình thông số vật lý và giới hạn điều khiển cho Xe Hai Bánh Tự Cân Bằng (STM32F401CCU6)
 
 chassis:
-  M: 0.6               # Khối lượng thân xe (kg)
-  m: 0.08               # Khối lượng 2 bánh xe (kg)
-  R: 0.0325             # Bán kính bánh xe (m) (Bánh xe tiêu chuẩn D=65mm)
-  L: 0.048              # Khoảng cách từ trục bánh xe tới khối tâm COM (m)
+  M: 0.610              # Khối lượng thân con lắc (kg)
+  m: 0.120              # Khối lượng tương đương 2 bánh xe (kg)
+  R: 0.0325             # Bán kính bánh xe (m) (Đường kính 65mm -> Chu vi 0.2042m)
+  L: 0.0850             # Chiều cao từ trục bánh xe tới khối tâm COM (m)
   H: 0.11               # Chiều cao thân xe (m)
-  W: 0.16               # Chiều rộng (khoảng cách giữa 2 bánh) (m)
+  W: 0.16               # Khoảng cách giữa 2 bánh xe (m)
   g: 9.81               # Gia tốc trọng trường (m/s^2)
-  I_body: 0.0016        # Mô men quán tính thân xe quanh khối tâm (kg*m^2)
+  I_body: 0.005068      # Mô men quán tính thân xe quanh khối tâm (kg*m^2)
 
 motor:
-  pwm_max: 4199         # Giá trị ARR tối đa của TIM4 PWM (20kHz)
-  pwm_deadzone: 450     # Bù vùng chết động cơ GA25 để vượt ma sát khởi động
-  encoder_cpr: 1320     # Số xung 1 vòng bánh (11 xung/vòng motor * tỷ số truyền 30)
-  gear_ratio: 30.0      # Tỷ số truyền hộp số GA25
+  pwm_timer_arr: 999    # TIM4 ARR = 999 (f_PWM = 21 kHz siêu âm, không rít)
+  pwm_max: 800          # Giá trị PWM trần tối đa (80% của 1000 để bảo vệ động cơ)
+  pwm_deadzone: 20      # Ngưỡng deadzone tham chiếu chung
+  pwm_deadzone_left: 23 # Deadzone riêng bánh trái (~85% ngưỡng có tải 27)
+  pwm_deadzone_right: 17 # Deadzone riêng bánh phải (~85% ngưỡng có tải 20)
+  motor_left_scale: 1.00 # Hệ số cân bằng tốc độ bánh trái
+  motor_right_scale: 0.93 # Hệ số cân bằng tốc độ bánh phải
+  encoder_cpr: 937      # GA25 tỷ số 21.3:1 (11 xung * 21.3 * 4 cạnh = 937.2 xung/vòng)
+  gear_ratio: 21.3      # Tỷ số truyền hộp số GA25 thực tế
   voltage_nominal: 11.1 # Điện áp danh định pin LiPo 3S (V)
   rpm_max: 280.0        # Vận tốc không tải ở 11.1V (RPM)
-  motor_left_polarity: 1      # Chiều quay động cơ trái (+1: chuẩn, -1: đảo chiều)
+  motor_left_polarity: 1      # Chiều quay động cơ trái (+1: chuẩn)
   motor_right_polarity: -1    # Chiều quay động cơ phải (-1: đảo do lắp đối xứng)
-  encoder_left_polarity: 1    # Hướng đếm encoder trái (+1: tiến đếm tăng, -1: đếm giảm)
-  encoder_right_polarity: -1  # Hướng đếm encoder phải (-1: tiến đếm tăng do lắp đối xứng)
-  mechanical_balance_offset: 0.0 # Góc lệch trọng tâm cân bằng cơ học (độ)
+  encoder_left_polarity: -1   # Hướng đếm encoder trái (-1: đếm tăng khi tiến)
+  encoder_right_polarity: 1   # Hướng đếm encoder phải (+1: đếm tăng khi tiến)
+  mechanical_balance_offset: -3.60 # Góc lệch trọng tâm cân bằng cơ học (độ)
 
 control:
   control_dt: 0.01      # Chu kỳ ngắt định thời TIM10: 10ms (100Hz)
-  theta_normal: 20.0    # Ngưỡng góc cân bằng bình thường (độ)
-  max_recovery_angle_X: 45.0 # Ngưỡng góc tối đa cho phép tự đứng dậy (độ)
-  max_target_angle: 10.0 # Giới hạn góc nghiêng mục tiêu từ vòng vận tốc (độ)
-  max_target_speed: 0.5  # Giới hạn vận tốc đặt từ Bluetooth BLE / App (m/s)
+  theta_safe_engage: 10.0 # Góc an toàn cho phép tái kích hoạt cân bằng (+/-10 độ)
+  theta_normal: 18.0    # Ngưỡng góc cân bằng bình thường (+/-18 độ)
+  max_recovery_angle_X: 25.0 # Ngưỡng góc tối đa ngắt động cơ bảo vệ (+/-25 độ)
+  max_target_angle: 12.0 # Giới hạn góc nghiêng mục tiêu vòng ngoài (độ)
+  max_target_speed: 0.50 # Giới hạn vận tốc đặt tối đa (m/s)
+  rc_move_speed: 0.15   # Tốc độ di chuyển tiến/lùi êm qua BLE (m/s)
+  rc_turn_offset_pwm: 150 # Độ lệch PWM quay trái/phải qua BLE
+
+pid_defaults:
+  angle_kp: 40.00       # Độ cứng vòng góc (mềm còn 60% trong vùng Soft-Zone +/-1.2 deg)
+  angle_ki: 0.000       # Khóa angle Ki = 0 chống windup
+  angle_kd: 1.400       # Giảm chấn góc liên tục (lọc gyro 0.60/0.40, fc ~10.6 Hz)
+  speed_kp: 28.00       # Vòng tốc độ P (phanh vận tốc & bù Back-EMF động cơ GA25)
+  speed_ki: 2.500       # Vòng vị trí I (neo vị trí & dẫn tiến/lùi mượt, kẹp +/-2.5 deg)
 
 uart:
   baudrate: 115200      # Tốc độ baud USART1 (Giao tiếp ESP32-S3 BLE Bridge / PC)

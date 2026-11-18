@@ -61,12 +61,12 @@ void Error_Handler(void);
 #define AIN1_GPIO_Port GPIOA
 #define AIN2_Pin GPIO_PIN_5
 #define AIN2_GPIO_Port GPIOA
-#define BIN1_Pin GPIO_PIN_6
+#define BIN1_Pin GPIO_PIN_3
 #define BIN1_GPIO_Port GPIOA
 #define BIN2_Pin GPIO_PIN_7
 #define BIN2_GPIO_Port GPIOA
-#define STBY_Pin GPIO_PIN_0
-#define STBY_GPIO_Port GPIOB
+#define STBY_Pin GPIO_PIN_2
+#define STBY_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 

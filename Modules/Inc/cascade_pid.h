@@ -75,6 +75,17 @@ void CascadePID_Reset(void);
 void CascadePID_SetGains(float ang_kp, float ang_ki, float ang_kd, float spd_kp, float spd_ki);
 
 /**
+ * @brief  Adjust mechanical balance zero-point offset in degrees.
+ * @param  offset_deg: Pitch offset (positive tilts forward, negative tilts backward)
+ */
+void CascadePID_SetBalanceOffset(float offset_deg);
+
+/**
+ * @brief  Get current mechanical balance zero-point offset in degrees.
+ */
+float CascadePID_GetBalanceOffset(void);
+
+/**
  * @brief  Execute one iteration of dual-loop Cascade PID calculation.
  * @param  target_speed: Desired speed in m/s (from Bluetooth or FSM command)
  * @param  measured_speed: Real speed in m/s (from wheel encoders)

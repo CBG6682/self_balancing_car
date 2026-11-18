@@ -9,7 +9,7 @@ Components Tested:
 2. STM32 Physical UART Handshake (PING/PONG & STATUS)
 3. MPU6050 6-DOF IMU & I2C Bus (PB6 SCL / PB7 SDA, Pitch Angle, Gyro Rate)
 4. GA25 Wheel Encoders (TIM2 PA0/PA1, TIM3 PB4/PB5)
-5. TB6612 Dual H-Bridge & Left Motor (PWMA PB8, AIN1 PA4, AIN2 PA5, STBY PB0)
+5. TB6612 Dual H-Bridge & Left Motor (PWMA PB8, AIN1 PA4, AIN2 PA5, STBY PA2)
 6. TB6612 Dual H-Bridge & Right Motor (PWMB PB9, BIN1 PA6, BIN2 PA7)
 7. Dual Motor Synchronization & Emergency Brake (Safety Stop)
 """
@@ -824,7 +824,7 @@ def main():
                     test_results[STEP_6] = "PASS"
                 else:
                     logger.error("Bánh xe Trái không quay!")
-                    print("  -> Kiểm tra: Pin cấp vào VM (7.4V), công tắc nguồn, chân STBY (PB0), PWMA (PB8), AIN1 (PA4), AIN2 (PA5).")
+                    print("  -> Kiểm tra: Pin cấp vào VM (7.4V), công tắc nguồn, chân STBY (PA2), PWMA (PB8), AIN1 (PA4), AIN2 (PA5).")
                     test_results[STEP_6] = "FAIL"
 
         # =====================================================================

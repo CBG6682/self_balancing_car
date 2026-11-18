@@ -4,7 +4,7 @@
  * @brief   TB6612FNG Dual H-Bridge Motor Driver & 2-Wheel Encoder Module.
  *          Target: STM32F401CCU6
  *          - Motor PWM: TIM4_CH3 (PB8), TIM4_CH4 (PB9), ARR = 4199
- *          - Direction: PA4 (AIN1), PA5 (AIN2), PA6 (BIN1), PA7 (BIN2), PB0 (STBY)
+ *          - Direction: PA4 (AIN1), PA5 (AIN2), PA3 (BIN1), PA7 (BIN2), PA2 (STBY)
  *          - Encoder Left: TIM2 (PA0/PA1), ARR = 65535
  *          - Encoder Right: TIM3 (PB4/PB5), ARR = 65535
  * ==============================================================================
@@ -85,6 +85,17 @@ void Motor_Enable(void);
 void Motor_SetDeadzone(uint16_t deadzone);
 
 /**
+ * @brief  Get current motor deadzone compensation value.
+ */
+uint16_t Motor_GetDeadzone(void);
+
+/**
+ * @brief  Directly output raw PWM duty cycle without deadzone compensation.
+ *         Used for automated deadzone calibration and low-level testing.
+ */
+void Motor_SetRawPWM(int16_t pwm_l, int16_t pwm_r);
+
+/**
  * @brief  Configure motor and encoder direction polarities (+1 or -1).
  */
 void Motor_SetPolarity(int8_t ml, int8_t mr, int8_t el, int8_t er);
@@ -98,6 +109,70 @@ void Motor_GetPolarity(int8_t *ml, int8_t *mr, int8_t *el, int8_t *er);
  * @brief  Run motors directly for hardware testing / verification.
  */
 void Motor_TestRun(int16_t pwm_l, int16_t pwm_r);
+
+typedef enum {
+    SYS_MODE_BIN_PROBE = 0,  // Static probe mode: STBY=0V, PWM=0, logic & candidate pins=3.3V
+    SYS_MODE_OFF       = 1,  // Complete shutdown: ALL pins strictly 0V, auto-balance disabled
+    SYS_MODE_AUTO      = 2,  // Active self-balancing mode: Cascade PID + FSM active
+    SYS_MODE_MANUAL    = 3   // Direct manual motor control (M:FWD / M:REV)
+} system_mode_t;
+
+extern volatile system_mode_t g_system_mode;
+extern volatile uint8_t g_motor_manual_override;
+
+/**
+ * @brief  Enter Static Multimeter Probe Mode:
+ *         Lock STBY (PA2) strictly to 0V, drive AIN1, AIN2, BIN1, BIN2, and PWM (PWMA, PWMB) HIGH (3.3V)
+ *         so user can verify hardware wiring with a multimeter while motors remain safely disabled.
+ */
+void Motor_EnterMode_BIN_Probe(void);
+
+/**
+ * @brief  Selectively probe driver pins with STBY strictly locked to 0V.
+ * @param  a_en: 1 to set AIN1 (PA4) & AIN2 (PA5) = 3.3V
+ * @param  b_en: 1 to set BIN1 (PA3) & BIN2 (PA7) = 3.3V
+ * @param  pwm_en: 1 to set PWMA (PB8) & PWMB (PB9) = 3.3V (100% duty)
+ */
+void Motor_ProbeDriverPins(uint8_t a_en, uint8_t b_en, uint8_t pwm_en);
+
+/**
+ * @brief  Enter OFF Mode: Lock ALL pins (STBY, driver pins, PWM, and candidate pins) strictly to 0V.
+ *         Prevents auto-waking into self-balancing when placed on the ground.
+ */
+void Motor_EnterMode_OFF(void);
+
+/**
+ * @brief  Enter AUTO Self-Balancing Mode (Explicitly requested via 'AUTO' or 'MODE:AUTO').
+ */
+void Motor_EnterMode_AUTO(void);
+
+/**
+ * @brief  Force continuous DC 3.3V on motor control pins for static VOM multimeter hardware probing.
+ * @param  enable: 1 to hold STBY=3.3V, AIN1=3.3V, BIN1=3.3V, PWMA=3.3V (100%), PWMB=3.3V (100%)
+ *                 0 to release and turn off all outputs.
+ */
+void Motor_ForceDCOutput(uint8_t enable);
+
+/**
+ * @brief  Force continuous DC 3.3V on motor control pins for static VOM multimeter hardware probing.
+ * @param  dir: +1 for Forward (AIN1=3.3V, AIN2=0V, BIN1=3.3V, BIN2=0V)
+ *              -1 for Reverse (AIN1=0V, AIN2=3.3V, BIN1=0V, BIN2=3.3V)
+ *               0 for OFF (all 0V).
+ */
+void Motor_ForceDCDirection(int8_t dir);
+
+/**
+ * @brief  Drive ALL available motor control pins HIGH (3.3V) for static multimeter probing.
+ * @param  stby_high: 1 to also set STBY (PA2) = 3.3V (all 7 pins 3.3V),
+ *                    0 to keep STBY (PA2) = 0V (6 pins 3.3V, driver locked in standby).
+ */
+void Motor_ProbeAllPins_High(uint8_t stby_high);
+
+/**
+ * @brief  Lock STBY to 0V (TB6612 driver safely disabled) and drive all control pins HIGH (3.3V)
+ *         for static multimeter hardware probing.
+ */
+void Motor_ProbeBIN_High_STBY_Lock(void);
 
 /**
  * @brief  Reset cumulative encoder pulse counters and distance to zero.

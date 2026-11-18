@@ -5,7 +5,7 @@
  *          States:
  *          - STATE_BALANCING: Normal upright cascade control & RC commands
  *          - STATE_RECOVERY: Bang-bang swing-up impulse on moderate tilt
- *          - STATE_IDLE: Safe shutdown when fallen over (PB0 STBY LOW, PWM 0)
+ *          - STATE_IDLE: Safe shutdown when fallen over (PA2 STBY LOW, PWM 0)
  *          Target: STM32F401CCU6
  * ==============================================================================
  */
@@ -47,8 +47,14 @@ typedef struct {
     float turn_offset;              // Steering PWM offset sent to Cascade PID
     uint16_t recovery_timer_ticks;  // Timeout counter in RECOVERY state (10ms ticks)
     uint16_t cmd_timeout_ticks;     // Inactivity timeout counter for RC commands
-    float theta_normal;             // Normal balance threshold (e.g. 20.0 deg)
-    float theta_max_recovery;       // Boundary limit for recovery attempt (e.g. 45.0 deg)
+    float theta_safe_engage;        // Safe angle to re-enable motors (e.g. 10.0 deg)
+    float theta_normal;             // Normal balance threshold (e.g. 18.0 deg)
+    float theta_max_recovery;       // Cutoff angle (e.g. 25.0 deg)
+    uint8_t overload_tripped;       // Flag set when motor load exceeds 80%
+    uint16_t overload_ticks;        // Counter for sustained >= 80% motor load
+    uint16_t safe_stand_ticks;      // Counter for stable upright position before re-engaging
+    int16_t last_pwm_l;             // For soft-ramp slew rate limiting
+    int16_t last_pwm_r;             // For soft-ramp slew rate limiting
 } robot_fsm_t;
 
 /* -----------------------------------------------------------------------------
@@ -61,6 +67,13 @@ typedef struct {
  * @param  max_recovery_angle: Maximum tilt allowed for recovery attempt (typically 45.0)
  */
 void RobotFSM_Init(float theta_normal, float max_recovery_angle);
+
+/**
+ * @brief  Dynamically update FSM angle thresholds.
+ * @param  theta_normal: Cutoff angle for normal balancing (e.g. 30.0 deg)
+ * @param  max_recovery_angle: Emergency cutoff angle (e.g. 55.0 deg)
+ */
+void RobotFSM_SetThresholds(float theta_normal, float max_recovery_angle);
 
 /**
  * @brief  Set remote control command (from Bluetooth or serial script).

@@ -7,10 +7,13 @@
  */
 
 #include "cascade_pid.h"
+#include <math.h>
 #include <string.h>
 
 /* Private module instance */
 static cascade_pid_t s_pid;
+static float s_gyro_filtered = 0.0f;
+static float s_balance_offset = MECHANICAL_BALANCE_OFFSET_DEG;
 
 /* -----------------------------------------------------------------------------
  * Public API Implementation
@@ -19,6 +22,8 @@ static cascade_pid_t s_pid;
 void CascadePID_Init(void)
 {
     memset(&s_pid, 0, sizeof(cascade_pid_t));
+    s_gyro_filtered = 0.0f;
+    s_balance_offset = MECHANICAL_BALANCE_OFFSET_DEG;
 
     // Load initial gains from pid_AutoConfig.h
     s_pid.angle_kp = DEFAULT_ANGLE_KP;
@@ -34,8 +39,8 @@ void CascadePID_Init(void)
     s_pid.max_target_angle_deg  = MAX_TARGET_ANGLE_DEG;
 
     // Limit integral windup to prevent actuator saturation latency
-    s_pid.angle_integral_limit  = 800.0f;   // Max PWM contribution from angle integral
-    s_pid.speed_integral_limit  = 5.0f;     // Max degrees contribution from speed integral
+    s_pid.angle_integral_limit  = 150.0f;   // Max PWM contribution from angle integral (ARR = 999 scale)
+    s_pid.speed_integral_limit  = 3.0f;     // Max degrees contribution from speed integral
 }
 
 void CascadePID_Reset(void)
@@ -46,6 +51,7 @@ void CascadePID_Reset(void)
     s_pid.speed_error    = 0.0f;
     s_pid.speed_integral = 0.0f;
     s_pid.speed_filtered = 0.0f;
+    s_gyro_filtered      = 0.0f;
 
     s_pid.target_angle_deg = 0.0f;
     s_pid.pwm_output_left  = 0;
@@ -59,7 +65,24 @@ void CascadePID_SetGains(float ang_kp, float ang_ki, float ang_kd, float spd_kp,
     if (ang_kd >= 0.0f) s_pid.angle_kd = ang_kd;
 
     if (spd_kp >= 0.0f) s_pid.speed_kp = spd_kp;
-    if (spd_ki >= 0.0f) s_pid.speed_ki = spd_ki;
+    if (spd_ki >= 0.0f) {
+        if (spd_ki != s_pid.speed_ki) {
+            s_pid.speed_integral = 0.0f; // Bumpless transition when changing sKi live via Bluetooth
+        }
+        s_pid.speed_ki = spd_ki;
+    }
+}
+
+void CascadePID_SetBalanceOffset(float offset_deg)
+{
+    if (offset_deg >= -15.0f && offset_deg <= 15.0f) {
+        s_balance_offset = offset_deg;
+    }
+}
+
+float CascadePID_GetBalanceOffset(void)
+{
+    return s_balance_offset;
 }
 
 void CascadePID_Compute(float target_speed, float measured_speed,
@@ -71,28 +94,51 @@ void CascadePID_Compute(float target_speed, float measured_speed,
         dt = 0.01f;
     }
 
+    // Apply mechanical balance zero-point offset
+    float angle_calibrated = measured_angle - s_balance_offset;
+
     /* -------------------------------------------------------------------------
-     * 1. OUTER LOOP: Velocity PI Control
-     * Purpose: Compute desired pitch tilt angle to achieve target speed.
+     * 1. OUTER LOOP: Velocity PI Control (Virtual Mattress Compliance)
+     * Purpose: Compute desired pitch tilt angle to brake drift & hold position.
      * ---------------------------------------------------------------------- */
-    // Apply low-pass filter to measured speed to suppress discrete encoder step noise
-    s_pid.speed_filtered = 0.75f * s_pid.speed_filtered + 0.25f * measured_speed;
+    // Balanced low-pass filter on wheel speed (fc ~2.8Hz at 100Hz): cuts encoder noise with less phase lag
+    s_pid.speed_filtered = 0.85f * s_pid.speed_filtered + 0.15f * measured_speed;
 
-    s_pid.speed_error = target_speed - s_pid.speed_filtered;
+    // Smooth quadratic softening around zero velocity (+/- 0.02 m/s):
+    // Eliminates hard deadband step cliff while suppressing 1-pulse encoder chatter at rest.
+    float v_raw = s_pid.speed_filtered;
+    float v_active = v_raw;
+    if (fabsf(target_speed) < 0.002f) {
+        float abs_v = fabsf(v_raw);
+        if (abs_v < 0.02f) {
+            v_active = v_raw * (abs_v / 0.02f);
+        }
+    }
+    // P branch ALWAYS damps actual wheel speed (-v_active) so sKp=28 never whips the body on F/B commands;
+    // I branch integrates (target_speed - v_raw) to smoothly glide the robot forward/backward at target_speed.
+    s_pid.speed_error = -v_active;                 // cho P (luôn phanh êm & bù Back-EMF)
+    float speed_error_i = target_speed - v_raw;    // cho I (dẫn tốc độ tiến/lùi & neo vị trí)
 
-    // Integral calculation with Anti-windup
-    s_pid.speed_integral += s_pid.speed_error * dt;
-    if (s_pid.speed_integral > s_pid.speed_integral_limit) {
-        s_pid.speed_integral = s_pid.speed_integral_limit;
-    } else if (s_pid.speed_integral < -s_pid.speed_integral_limit) {
-        s_pid.speed_integral = -s_pid.speed_integral_limit;
+    // Position integral: active within +/- 6 deg so minor external pushes do not erase position anchor
+    if (s_pid.speed_ki <= 0.001f) {
+        s_pid.speed_integral = 0.0f;
+    } else if (angle_calibrated >= -6.0f && angle_calibrated <= 6.0f) {
+        s_pid.speed_integral += speed_error_i * dt;
+        float i_lim = (s_pid.speed_ki > 0.01f) ? (2.5f / s_pid.speed_ki) : 3.0f; // Max +/-2.5 deg contribution
+        if (s_pid.speed_integral > i_lim) {
+            s_pid.speed_integral = i_lim;
+        } else if (s_pid.speed_integral < -i_lim) {
+            s_pid.speed_integral = -i_lim;
+        }
+    } else {
+        // Gentle decay when tilted sharply to prevent sudden rubber-band lurch
+        s_pid.speed_integral *= 0.98f;
     }
 
     // Desired pitch angle in degrees (outer loop output)
-    // Note: To accelerate forward (positive speed), the robot must tilt slightly forward (positive angle)
     float raw_target_angle = (s_pid.speed_kp * s_pid.speed_error) + (s_pid.speed_ki * s_pid.speed_integral);
 
-    // Clamp desired pitch angle to safe maximum (e.g. +/- 10 degrees)
+    // Clamp desired pitch angle to safe maximum (e.g. +/- 5 degrees)
     if (raw_target_angle > s_pid.max_target_angle_deg) {
         raw_target_angle = s_pid.max_target_angle_deg;
     } else if (raw_target_angle < -s_pid.max_target_angle_deg) {
@@ -101,12 +147,10 @@ void CascadePID_Compute(float target_speed, float measured_speed,
     s_pid.target_angle_deg = raw_target_angle;
 
     /* -------------------------------------------------------------------------
-     * 2. INNER LOOP: Pitch Angle PD/PID Control
-     * Purpose: High-speed balance stabilization maintaining target_angle.
-     * When leaning forward (measured_angle > target_angle), motors must drive
-     * forward (positive PWM) to push wheels under COM and restore balance.
+     * 2. INNER LOOP: Pitch Angle PD/PID Control (Soft-Zone Mattress Damping)
+     * Purpose: Soft compliance near upright 0 deg, full torque against external push.
      * ---------------------------------------------------------------------- */
-    s_pid.angle_error = measured_angle - s_pid.target_angle_deg;
+    s_pid.angle_error = angle_calibrated - s_pid.target_angle_deg;
 
     // Angle integral accumulation with clamp
     s_pid.angle_integral += s_pid.angle_error * dt;
@@ -116,11 +160,22 @@ void CascadePID_Compute(float target_speed, float measured_speed,
         s_pid.angle_integral = -s_pid.angle_integral_limit;
     }
 
-    // Direct derivative from Gyroscope angular rate (+gyro_rate):
-    // Positive pitch rate means tipping forward faster, requiring more forward torque
-    float angle_derivative = gyro_rate;
+    // Virtual Mattress Soft-Zone Gain Scheduling around equilibrium (|angle_error| < 1.2 deg):
+    // Softens stiffness to 60% right at 0 deg (prevents hard-floor jitter & gear lash hammer),
+    // ramping smoothly to 100% full Kp at >= 1.2 deg to resist external pushes cleanly.
+    float abs_ang_err = fabsf(s_pid.angle_error);
+    float kp_scale = 1.0f;
+    if (abs_ang_err < 1.2f) {
+        kp_scale = 0.60f + 0.40f * (abs_ang_err / 1.2f);
+    }
+    float eff_angle_kp = s_pid.angle_kp * kp_scale;
 
-    float balance_u = (s_pid.angle_kp * s_pid.angle_error) +
+    // Continuous angular rate derivative from Gyroscope (fc ~10.6Hz at 100Hz):
+    // Strong continuous damping acts as virtual foam shock absorber.
+    s_gyro_filtered = 0.60f * s_gyro_filtered + 0.40f * gyro_rate;
+    float angle_derivative = s_gyro_filtered;
+
+    float balance_u = (eff_angle_kp * s_pid.angle_error) +
                       (s_pid.angle_ki * s_pid.angle_integral) +
                       (s_pid.angle_kd * angle_derivative);
 

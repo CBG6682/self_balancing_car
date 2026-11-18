@@ -113,6 +113,17 @@ uint8_t Telemetry_IsBLEConnected(void);
  */
 void Telemetry_SendStatus(float angle, float speed, uint8_t state);
 
+/**
+ * @brief  Flush and clear all RX ring buffers, line buffers, and reset UART error flags.
+ *         Use this to eliminate latency, free memory/queues, and recover from line noise.
+ */
+void Telemetry_FlushBuffers(void);
+
+/**
+ * @brief  Perform a complete software system reboot of the STM32 MCU.
+ */
+void Telemetry_SystemReboot(void);
+
 #ifdef __cplusplus
 }
 #endif

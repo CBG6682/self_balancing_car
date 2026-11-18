@@ -76,16 +76,21 @@ unsigned long last_flush_time = 0;
 class ServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* pServerInstance) override {
         deviceConnected = true;
-        Serial.println("[BLE] Client connected!");
+        ble_tx_idx = 0; // Clear stale outgoing BLE buffer
+        while (Serial1.available()) Serial1.read(); // Clear stale UART incoming bytes
+        Serial.println("[BLE] Client connected! Cleared buffers.");
         // Notify STM32 of new connection
         Serial1.print("BLE:CONNECTED\n");
+        Serial1.flush();
     }
 
     void onDisconnect(BLEServer* pServerInstance) override {
         deviceConnected = false;
+        ble_tx_idx = 0; // Clear outgoing BLE buffer
         Serial.println("[BLE] Client disconnected! Informing STM32 for auto-stop...");
         // Fail-safe: Notify STM32 to immediately execute CMD_STOP
         Serial1.print("BLE:DISCONNECTED\n");
+        Serial1.flush();
     }
 };
 
@@ -96,8 +101,9 @@ class RxCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pChar) override {
         String rxValue = pChar->getValue();
         if (rxValue.length() > 0) {
-            // Forward directly to STM32 UART1
+            // Forward directly to STM32 UART1 immediately
             Serial1.write((const uint8_t*)rxValue.c_str(), rxValue.length());
+            Serial1.flush(); // Flush hardware FIFO for zero transmission latency
 
             // Echo to USB Serial debug console
             Serial.print("[BLE->STM32] ");

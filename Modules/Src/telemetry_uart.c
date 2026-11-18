@@ -42,13 +42,11 @@ static void format_float(char *out, size_t out_sz, float val, int decimals)
     long factor = 1;
     for (int i = 0; i < decimals; i++) factor *= 10;
     long total = (long)(val * factor);
-    if (val < 0 && total == 0) {
-        snprintf(out, out_sz, "-0.%0*lu", decimals, 0UL);
-    } else {
-        long int_part = total / factor;
-        long frac_part = labs(total % factor);
-        snprintf(out, out_sz, "%ld.%0*lu", int_part, decimals, frac_part);
-    }
+    const char *sign = (val < 0.0f && total != 0) ? "-" : "";
+    long abs_total = labs(total);
+    long int_part = abs_total / factor;
+    long frac_part = abs_total % factor;
+    snprintf(out, out_sz, "%s%ld.%0*lu", sign, int_part, decimals, (unsigned long)frac_part);
 }
 
 /* -----------------------------------------------------------------------------
@@ -102,41 +100,76 @@ static void ProcessCommandLine(char *cmd_line)
         return;
     }
 
-    // 3. Status Query (Detailed hardware & telemetry status)
-    if (strcmp(cmd_line, "STATUS") == 0 || strcmp(cmd_line, "CMD:STATUS") == 0) {
-        char status_buf[140];
+    // 3. Status & Parameter Query (Comprehensive car telemetry and controller settings)
+    if (strcasecmp(cmd_line, "PARAMS") == 0 || strcasecmp(cmd_line, "GET_PARAMS") == 0 ||
+        strcasecmp(cmd_line, "INFO") == 0 || strcasecmp(cmd_line, "STATUS") == 0 ||
+        strcasecmp(cmd_line, "CMD:STATUS") == 0) {
+        const cascade_pid_t *pid = CascadePID_GetData();
         const motor_encoder_data_t *enc = MotorEncoder_GetData();
-        char s_pitch[16], s_gyro[16], s_spd[16];
+        char s_pitch[16], s_gyro[16], s_spd[16], s_off[16];
+        char s_kp[16], s_ki[16], s_kd[16], s_skp[16], s_ski[16];
         format_float(s_pitch, sizeof(s_pitch), MPU6050_GetPitch(), 2);
         format_float(s_gyro, sizeof(s_gyro), MPU6050_GetGyroRate(), 2);
         format_float(s_spd, sizeof(s_spd), enc->speed_avg_mps, 2);
-        snprintf(status_buf, sizeof(status_buf),
-                 "STATUS:STATE=%s,PITCH=%s,GYRO=%s,SPD=%s,ENC_L=%ld,ENC_R=%ld,MPU=%u,BLE=%u\n",
+        format_float(s_off, sizeof(s_off), CascadePID_GetBalanceOffset(), 2);
+        format_float(s_kp, sizeof(s_kp), pid->angle_kp, 2);
+        format_float(s_ki, sizeof(s_ki), pid->angle_ki, 3);
+        format_float(s_kd, sizeof(s_kd), pid->angle_kd, 3);
+        format_float(s_skp, sizeof(s_skp), pid->speed_kp, 2);
+        format_float(s_ski, sizeof(s_ski), pid->speed_ki, 3);
+
+        char buf[512];
+        snprintf(buf, sizeof(buf),
+                 "\r\n=== THONG SO XE HIEN TAI ===\r\n"
+                 " • PID Goc   : Kp=%s, Ki=%s, Kd=%s\r\n"
+                 " • PI Toc do : sKp=%s, sKi=%s\r\n"
+                 " • Offset    : %s deg\r\n"
+                 " • Deadzone  : %u (ARR=999)\r\n"
+                 " • Che do    : %s\r\n"
+                 " • FSM State : %s\r\n"
+                 " • Sensor    : Pitch=%s deg, Gyro=%s dps\r\n"
+                 " • Van toc   : %s m/s (L=%ld, R=%ld)\r\n"
+                 "============================\r\n",
+                 s_kp, s_ki, s_kd,
+                 s_skp, s_ski,
+                 s_off,
+                 (unsigned int)Motor_GetDeadzone(),
+                 (g_system_mode == SYS_MODE_AUTO) ? "AUTO (TU CAN BANG)" : "OFF (DONG CO NGAT)",
                  RobotFSM_GetStateString(),
                  s_pitch,
                  s_gyro,
                  s_spd,
                  (long)enc->total_pulses_left,
-                 (long)enc->total_pulses_right,
-                 (unsigned int)MPU6050_IsConnected(),
-                 (unsigned int)s_ble_connected);
-        Telemetry_SendString(status_buf);
+                 (long)enc->total_pulses_right);
+        Telemetry_SendString(buf);
         return;
     }
 
-    // 4. Set Balance Zero Pitch Offset
-    // Format: CALIB_ZERO (auto capture current angle) or CALIB_ZERO:<angle>
-    if (strncmp(cmd_line, "CALIB_ZERO", 10) == 0) {
+    // 4. Set / Get Balance Zero Pitch Offset
+    // Format: SET_OFFSET:<angle>, OFFSET:<angle>, or CALIB_ZERO:<angle>
+    if (strncasecmp(cmd_line, "SET_OFFSET:", 11) == 0 ||
+        strncasecmp(cmd_line, "SET_OFFSET", 10) == 0 ||
+        strncasecmp(cmd_line, "OFFSET:", 7) == 0 ||
+        strncasecmp(cmd_line, "CALIB_ZERO", 10) == 0) {
         float offset = 0.0f;
-        if (cmd_line[10] == ':') {
-            offset = strtof(cmd_line + 11, NULL);
+        const char *p = strchr(cmd_line, ':');
+        if (p) {
+            offset = strtof(p + 1, NULL);
         } else {
             const mpu6050_data_t *imu = MPU6050_GetData();
             offset = imu->pitch + imu->accel_pitch_offset;
         }
-        MPU6050_SetZeroOffset(offset);
-        char ack[64];
-        snprintf(ack, sizeof(ack), "OK_CALIB_ZERO:offset=%.2f\n", offset);
+        CascadePID_SetBalanceOffset(offset);
+        char ack[64], s_off[16];
+        format_float(s_off, sizeof(s_off), offset, 2);
+        snprintf(ack, sizeof(ack), "OK_OFFSET:%s\r\n", s_off);
+        Telemetry_SendString(ack);
+        return;
+    }
+    if (strcasecmp(cmd_line, "GET_OFFSET") == 0 || strcasecmp(cmd_line, "OFFSET?") == 0) {
+        char ack[64], s_off[16];
+        format_float(s_off, sizeof(s_off), CascadePID_GetBalanceOffset(), 2);
+        snprintf(ack, sizeof(ack), "OFFSET:%s\r\n", s_off);
         Telemetry_SendString(ack);
         return;
     }
@@ -237,101 +270,231 @@ static void ProcessCommandLine(char *cmd_line)
         return;
     }
 
-    // 5. Hot PID Tuning Command
-    // Format: SET_PID:<ang_kp>,<ang_ki>,<ang_kd>,<spd_kp>,<spd_ki>
-    if (strncmp(cmd_line, "SET_PID:", 8) == 0) {
-        float ang_kp = 0.0f, ang_ki = 0.0f, ang_kd = 0.0f;
-        float spd_kp = 0.0f, spd_ki = 0.0f;
-        int parsed = sscanf(cmd_line + 8, "%f,%f,%f,%f,%f",
-                            &ang_kp, &ang_ki, &ang_kd, &spd_kp, &spd_ki);
-        if (parsed >= 5) {
-            CascadePID_SetGains(ang_kp, ang_ki, ang_kd, spd_kp, spd_ki);
-            char ack[64];
-            snprintf(ack, sizeof(ack), "OK_PID:%.2f,%.3f,%.3f,%.2f,%.3f\n",
-                     ang_kp, ang_ki, ang_kd, spd_kp, spd_ki);
-            Telemetry_SendString(ack);
-        } else {
-            Telemetry_SendString("ERR:SET_PID_SYNTAX\n");
+    // 5. Hot PID Tuning Commands
+    // Format: SET_PID:<ang_kp>,<ang_ki>,<ang_kd>,<spd_kp>,<spd_ki> or PID:<ang_kp>,...
+    if (strncasecmp(cmd_line, "SET_PID:", 8) == 0 || strncasecmp(cmd_line, "PID:", 4) == 0) {
+        char *p = strchr(cmd_line, ':');
+        if (p) {
+            char *next = p + 1;
+            float vals[5];
+            int count = 0;
+            for (int i = 0; i < 5; i++) {
+                while (*next == ' ' || *next == '\t') next++;
+                if (*next == '\0') break;
+                char *endptr = NULL;
+                vals[i] = strtof(next, &endptr);
+                if (endptr == next) break;
+                count++;
+                next = endptr;
+                while (*next == ' ' || *next == '\t') next++;
+                if (*next == ',') next++;
+            }
+            if (count >= 5) {
+                CascadePID_SetGains(vals[0], vals[1], vals[2], vals[3], vals[4]);
+                char s0[16], s1[16], s2[16], s3[16], s4[16];
+                format_float(s0, sizeof(s0), vals[0], 2);
+                format_float(s1, sizeof(s1), vals[1], 3);
+                format_float(s2, sizeof(s2), vals[2], 3);
+                format_float(s3, sizeof(s3), vals[3], 2);
+                format_float(s4, sizeof(s4), vals[4], 3);
+                char ack[96];
+                snprintf(ack, sizeof(ack), "OK_PID:%s,%s,%s,%s,%s\r\n", s0, s1, s2, s3, s4);
+                Telemetry_SendString(ack);
+                return;
+            }
         }
+        Telemetry_SendString("ERR:SET_PID_SYNTAX (SET_PID:kp,ki,kd,skp,ski)\r\n");
+        return;
+    }
+    if (strcasecmp(cmd_line, "GET_PID") == 0 || strcasecmp(cmd_line, "PID?") == 0 || strcasecmp(cmd_line, "PID") == 0) {
+        const cascade_pid_t *pid = CascadePID_GetData();
+        char s0[16], s1[16], s2[16], s3[16], s4[16];
+        format_float(s0, sizeof(s0), pid->angle_kp, 2);
+        format_float(s1, sizeof(s1), pid->angle_ki, 3);
+        format_float(s2, sizeof(s2), pid->angle_kd, 3);
+        format_float(s3, sizeof(s3), pid->speed_kp, 2);
+        format_float(s4, sizeof(s4), pid->speed_ki, 3);
+        char ack[96];
+        snprintf(ack, sizeof(ack), "PID:%s,%s,%s,%s,%s\r\n", s0, s1, s2, s3, s4);
+        Telemetry_SendString(ack);
         return;
     }
 
-    // 6. Onboard / Module LED Control Commands (Visual Verification without motors)
+    // 6. Operating Mode Commands (AUTO balancing vs STOP / OFF shutdown)
+    if (strcasecmp(cmd_line, "AUTO") == 0 ||
+        strcasecmp(cmd_line, "MODE:AUTO") == 0 ||
+        strcasecmp(cmd_line, "START") == 0 ||
+        strcasecmp(cmd_line, "RUN") == 0) {
+        Motor_EnterMode_AUTO();
+        Telemetry_SendString("OK_MODE:AUTO (Tu can bang BAT - Dung xe +/-10 deg de chay)\r\n");
+        return;
+    }
+    if (strcasecmp(cmd_line, "STOP") == 0 ||
+        strcasecmp(cmd_line, "OFF") == 0 ||
+        strcasecmp(cmd_line, "MODE:STOP") == 0 ||
+        strcasecmp(cmd_line, "MODE:OFF") == 0 ||
+        strcasecmp(cmd_line, "CMD:STOP") == 0) {
+        Motor_EnterMode_OFF();
+        RobotFSM_SetCommand(CMD_STOP);
+        Telemetry_SendString("OK_MODE:STOP (Dong co da NGAT hoan toan)\r\n");
+        return;
+    }
+
+    // 6b. Hardware Driver Pin Probing Commands (STBY locked strictly to 0.0V, safe multimeter testing)
+    if (strcasecmp(cmd_line, "PROBE") == 0 ||
+        strcasecmp(cmd_line, "PROBE:ALL") == 0 ||
+        strcasecmp(cmd_line, "TEST_PINS") == 0 ||
+        strcasecmp(cmd_line, "CHECK_PINS") == 0 ||
+        strcasecmp(cmd_line, "PROBE_DRIVER") == 0) {
+        Motor_EnterMode_BIN_Probe();
+        Telemetry_SendString(
+            "\r\n=== CHE DO KIEM TRA CHAN DRIVER (STBY KHOA 0V) ===\r\n"
+            " • STBY (PA2) : 0.0V (KHOA AN TOAN, DONG CO KHONG CHAY)\r\n"
+            " • AIN1 (PA4) : 3.3V (HIGH)\r\n"
+            " • AIN2 (PA5) : 3.3V (HIGH)\r\n"
+            " • BIN1 (PA3) : 3.3V (HIGH)\r\n"
+            " • BIN2 (PA7) : 3.3V (HIGH)\r\n"
+            " • PWMA (PB8) : 3.3V (PWM 100% DC)\r\n"
+            " • PWMB (PB9) : 3.3V (PWM 100% DC)\r\n"
+            "----------------------------------------------------\r\n"
+            "-> Lay dong ho VOM do dien ap tung chan tren TB6612.\r\n"
+            "-> Go 'STOP' hoac 'OFF' de ngat ve 0V.\r\n"
+            "-> Go 'AUTO' de quay lai tu can bang.\r\n"
+            "====================================================\r\n");
+        return;
+    }
+    if (strcasecmp(cmd_line, "PROBE:A") == 0) {
+        Motor_ProbeDriverPins(1, 0, 1);
+        Telemetry_SendString("OK_PROBE:A (AIN1=3.3V, AIN2=3.3V, PWMA=3.3V, BIN=0V, STBY=0V)\r\n");
+        return;
+    }
+    if (strcasecmp(cmd_line, "PROBE:B") == 0) {
+        Motor_ProbeDriverPins(0, 1, 1);
+        Telemetry_SendString("OK_PROBE:B (BIN1=3.3V, BIN2=3.3V, PWMB=3.3V, AIN=0V, STBY=0V)\r\n");
+        return;
+    }
+    if (strcasecmp(cmd_line, "PROBE:PWM") == 0) {
+        Motor_ProbeDriverPins(0, 0, 1);
+        Telemetry_SendString("OK_PROBE:PWM (PWMA=3.3V, PWMB=3.3V, AIN=0V, BIN=0V, STBY=0V)\r\n");
+        return;
+    }
+
+    // 7. Motor Deadzone Tuning Commands
+    if (strncasecmp(cmd_line, "SET_DEADZONE:", 13) == 0 ||
+        strncasecmp(cmd_line, "DEADZONE:", 9) == 0) {
+        const char *p = strchr(cmd_line, ':');
+        int dz = atoi(p + 1);
+        if (dz >= 0 && dz <= 400) {
+            Motor_SetDeadzone((uint16_t)dz);
+            char ack[48];
+            snprintf(ack, sizeof(ack), "OK_DEADZONE:%d\r\n", dz);
+            Telemetry_SendString(ack);
+            return;
+        }
+        Telemetry_SendString("ERR:DEADZONE_RANGE (0..400)\r\n");
+        return;
+    }
+    if (strcasecmp(cmd_line, "GET_DEADZONE") == 0 || strcasecmp(cmd_line, "DEADZONE?") == 0) {
+        char ack[48];
+        snprintf(ack, sizeof(ack), "DEADZONE:%u\r\n", (unsigned int)Motor_GetDeadzone());
+        Telemetry_SendString(ack);
+        return;
+    }
+
+    // 8. Odometry / Encoder Reset
+    if (strcasecmp(cmd_line, "RESET_ENC") == 0 || strcasecmp(cmd_line, "ZERO_ENC") == 0 || strcasecmp(cmd_line, "CLEAR_ENC") == 0) {
+        MotorEncoder_ResetCounters();
+        Telemetry_SendString("OK_ENC:RESET (0, 0)\r\n");
+        return;
+    }
+
+    // 9. Built-in Help Menu
+    if (strcasecmp(cmd_line, "HELP") == 0 || strcmp(cmd_line, "?") == 0) {
+        Telemetry_SendString(
+            "\r\n=== BANG LENH DIEU KHIEN BLUETOOTH ===\r\n"
+            " • PARAMS / INFO : Xem toan bo thong so xe\r\n"
+            " • GET_PID       : Xem 5 thong so PID\r\n"
+            " • SET_PID:kp,ki,kd,skp,ski : Cai dat PID (VD: SET_PID:35,0.15,0.32,5,0.6)\r\n"
+            " • OFFSET:val    : Chinh goc can bang (VD: OFFSET:0.00 hoac OFFSET:-0.20)\r\n"
+            " • GET_OFFSET    : Xem goc can bang hien tai\r\n"
+            " • AUTO / START  : Bat che do tu can bang\r\n"
+            " • STOP / OFF    : Ngat dong co khan cap\r\n"
+            " • PROBE         : Kich AIN, BIN, PWM len 3.3V (STBY khoa 0V do VOM)\r\n"
+            " • DEADZONE:val  : Chinh vung chet (VD: DEADZONE:18)\r\n"
+            " • RESET_ENC     : Reset quang duong encoder ve 0\r\n"
+            " • F / B / L / R : Tien / Lui / Trai / Phai\r\n"
+            " • S             : Dung di chuyen (giu thang bang tai cho)\r\n"
+            "=======================================\r\n");
+        return;
+    }
+
+    // 10. Onboard / Module LED Control Commands (Visual Verification without motors)
     if (strcasecmp(cmd_line, "CMD:LED_ON") == 0 ||
         strcasecmp(cmd_line, "LED:ON") == 0 ||
-        strcasecmp(cmd_line, "LED_ON") == 0 ||
-        strcmp(cmd_line, "1") == 0 ||
-        strcasecmp(cmd_line, "ON") == 0) {
+        strcasecmp(cmd_line, "LED_ON") == 0) {
         g_led_manual_mode = 1;
         Board_LED_Set(1); // 1 = LED ON (PC13 LOW)
-        Telemetry_SendString("OK_LED:ON\n");
+        Telemetry_SendString("OK_LED:ON\r\n");
         return;
     }
     if (strcasecmp(cmd_line, "CMD:LED_OFF") == 0 ||
         strcasecmp(cmd_line, "LED:OFF") == 0 ||
-        strcasecmp(cmd_line, "LED_OFF") == 0 ||
-        strcmp(cmd_line, "0") == 0 ||
-        strcasecmp(cmd_line, "OFF") == 0) {
+        strcasecmp(cmd_line, "LED_OFF") == 0) {
         g_led_manual_mode = 1;
         Board_LED_Set(0); // 0 = LED OFF (PC13 HIGH)
-        Telemetry_SendString("OK_LED:OFF\n");
+        Telemetry_SendString("OK_LED:OFF\r\n");
         return;
     }
     if (strcasecmp(cmd_line, "CMD:LED_TOGGLE") == 0 ||
         strcasecmp(cmd_line, "LED:TOGGLE") == 0 ||
-        strcasecmp(cmd_line, "LED_TOGGLE") == 0 ||
-        strcasecmp(cmd_line, "T") == 0 ||
-        strcasecmp(cmd_line, "TOGGLE") == 0) {
+        strcasecmp(cmd_line, "LED_TOGGLE") == 0) {
         g_led_manual_mode = 1;
         Board_LED_Toggle();
-        Telemetry_SendString("OK_LED:TOGGLE\n");
+        Telemetry_SendString("OK_LED:TOGGLE\r\n");
         return;
     }
     if (strcasecmp(cmd_line, "CMD:LED_AUTO") == 0 ||
         strcasecmp(cmd_line, "LED:AUTO") == 0 ||
-        strcasecmp(cmd_line, "LED_AUTO") == 0 ||
-        strcasecmp(cmd_line, "A") == 0 ||
-        strcasecmp(cmd_line, "AUTO") == 0) {
+        strcasecmp(cmd_line, "LED_AUTO") == 0) {
         g_led_manual_mode = 0;
-        Telemetry_SendString("OK_LED:AUTO\n");
+        Telemetry_SendString("OK_LED:AUTO\r\n");
         return;
     }
 
-    // 7. Motion Control Commands (Full string and single-letter short forms)
-    // In addition to setting FSM command, also toggles LED to provide visual feedback!
+    // 11. Motion Control Commands (Full string and single-letter short forms)
     if (strcasecmp(cmd_line, "CMD:FORWARD") == 0 || strcasecmp(cmd_line, "FORWARD") == 0 || strcasecmp(cmd_line, "F") == 0) {
         RobotFSM_SetCommand(CMD_FORWARD);
         Board_LED_Toggle();
-        Telemetry_SendString("OK_CMD:FORWARD\n");
+        Telemetry_SendString("OK_CMD:FORWARD\r\n");
         return;
     }
     if (strcasecmp(cmd_line, "CMD:BACKWARD") == 0 || strcasecmp(cmd_line, "BACKWARD") == 0 || strcasecmp(cmd_line, "B") == 0) {
         RobotFSM_SetCommand(CMD_BACKWARD);
         Board_LED_Toggle();
-        Telemetry_SendString("OK_CMD:BACKWARD\n");
+        Telemetry_SendString("OK_CMD:BACKWARD\r\n");
         return;
     }
     if (strcasecmp(cmd_line, "CMD:LEFT") == 0 || strcasecmp(cmd_line, "LEFT") == 0 || strcasecmp(cmd_line, "L") == 0) {
         RobotFSM_SetCommand(CMD_TURN_LEFT);
         Board_LED_Toggle();
-        Telemetry_SendString("OK_CMD:LEFT\n");
+        Telemetry_SendString("OK_CMD:LEFT\r\n");
         return;
     }
     if (strcasecmp(cmd_line, "CMD:RIGHT") == 0 || strcasecmp(cmd_line, "RIGHT") == 0 || strcasecmp(cmd_line, "R") == 0) {
         RobotFSM_SetCommand(CMD_TURN_RIGHT);
         Board_LED_Toggle();
-        Telemetry_SendString("OK_CMD:RIGHT\n");
+        Telemetry_SendString("OK_CMD:RIGHT\r\n");
         return;
     }
-    if (strcasecmp(cmd_line, "CMD:STOP") == 0 || strcasecmp(cmd_line, "STOP") == 0 || strcasecmp(cmd_line, "S") == 0) {
+    if (strcasecmp(cmd_line, "S") == 0 || strcasecmp(cmd_line, "HALT") == 0) {
         RobotFSM_SetCommand(CMD_STOP);
         Board_LED_Toggle();
-        Telemetry_SendString("OK_CMD:STOP\n");
+        Telemetry_SendString("OK_CMD:STOP\r\n");
         return;
     }
 
     // Unknown command
-    Telemetry_SendString("ERR:UNKNOWN_CMD\n");
+    Telemetry_SendString("ERR:UNKNOWN_CMD (Go 'HELP' de xem danh sach lenh)\r\n");
 }
 
 /* -----------------------------------------------------------------------------
@@ -443,16 +606,26 @@ void Telemetry_SendData(float angle, float gyro, int16_t pwm,
 {
     if (s_huart == NULL) return;
 
+    const cascade_pid_t *pid = CascadePID_GetData();
+    const motor_encoder_data_t *mot = MotorEncoder_GetData();
+
     char s_ang[16], s_gyr[16];
+    char s_targ[16], s_vfilt[16], s_iterm[16];
     format_float(s_ang, sizeof(s_ang), angle, 2);
     format_float(s_gyr, sizeof(s_gyr), gyro, 2);
+    format_float(s_targ, sizeof(s_targ), pid->target_angle_deg, 2);
+    format_float(s_vfilt, sizeof(s_vfilt), pid->speed_filtered, 3);
+    format_float(s_iterm, sizeof(s_iterm), pid->speed_ki * pid->speed_integral, 2);
 
-    char tx_buf[96];
-    int len = snprintf(tx_buf, sizeof(tx_buf), "DATA:%s,%s,%d,%ld,%ld,%u\n",
-                       s_ang, s_gyr, (int)pwm, (long)enc_left, (long)enc_right, (unsigned int)state);
+    char tx_buf[160];
+    int len = snprintf(tx_buf, sizeof(tx_buf),
+                       "DATA:%s,%s,%d,%ld,%ld,%u\n"
+                       "DBG:%s,%s,%s,%d,%d\r\n",
+                       s_ang, s_gyr, (int)pwm, (long)enc_left, (long)enc_right, (unsigned int)state,
+                       s_targ, s_vfilt, s_iterm, (int)mot->pwm_left, (int)mot->pwm_right);
 
     if (len > 0) {
-        HAL_UART_Transmit(s_huart, (uint8_t*)tx_buf, (uint16_t)len, 10);
+        HAL_UART_Transmit(s_huart, (uint8_t*)tx_buf, (uint16_t)len, 15);
     }
 }
 

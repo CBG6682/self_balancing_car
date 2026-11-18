@@ -148,6 +148,12 @@ int main(void)
 
   /* Start 100Hz Control Loop Timer (10ms tick interrupt) */
   HAL_TIM_Base_Start_IT(&htim10);
+
+  /* Enter Default Autonomous Balancing Mode (Auto engage when held upright +/-10 deg) */
+  Motor_EnterMode_AUTO();
+  Telemetry_SendString("\r\n[SYS] AUTONOMOUS SELF-BALANCING MODE READY:\r\n");
+  Telemetry_SendString("  • Cascade PID balance active (Kp=65, Kd=1.3, Ki=0.08, Offset=+1.10 deg)\r\n");
+  Telemetry_SendString("  • Place robot upright within +/-10 deg to engage balancing!\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -171,17 +177,20 @@ int main(void)
       // 3. Read Encoders and calculate wheel velocities
       MotorEncoder_Update(CONTROL_DT_SEC);
 
-      // 4. Update FSM State Machine & Cascade PID
+      // 4. Update FSM State Machine & Cascade PID ONLY if user explicitly switched to AUTO mode
       int16_t pwm_left = 0;
       int16_t pwm_right = 0;
       const motor_encoder_data_t *enc_data = MotorEncoder_GetData();
 
-      RobotFSM_Update(MPU6050_GetPitch(), MPU6050_GetGyroRate(),
-                      enc_data->speed_avg_mps, CONTROL_DT_SEC,
-                      &pwm_left, &pwm_right);
+      if (g_system_mode == SYS_MODE_AUTO)
+      {
+        RobotFSM_Update(MPU6050_GetPitch(), MPU6050_GetGyroRate(),
+                        enc_data->speed_avg_mps, CONTROL_DT_SEC,
+                        &pwm_left, &pwm_right);
 
-      // 5. Output PWM to TB6612 Dual H-Bridge
-      Motor_SetOutput(pwm_left, pwm_right);
+        // 5. Output PWM to TB6612 Dual H-Bridge
+        Motor_SetOutput(pwm_left, pwm_right);
+      }
 
       // 6. Send Telemetry if streaming is active
       if (Telemetry_IsStreaming())
